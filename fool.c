@@ -15,6 +15,32 @@
 #define REDIS_WARNING 3
 
 #define REDIS_IOBUF_LEN 1024
+#define REDIS_REQUEST_MAX_SIZE (1024 * 1024 * 256) /* max bytes in inline command */
+
+/* Object types */
+#define REDIS_STRING 0
+#define REDIS_LIST 1
+#define REDIS_SET 2
+#define REDIS_ZSET 3
+#define REDIS_HASH 4
+
+/* Objects encoding. Some kind of objects like Strings and Hashes can be
+ * internally represented in multiple ways. The 'encoding' field of the object
+ * is set to one of this fields for this object. */
+#define REDIS_ENCODING_RAW 0    /* Raw representation */
+#define REDIS_ENCODING_INT 1    /* Encoded as integer */
+#define REDIS_ENCODING_ZIPMAP 2 /* Encoded as zipmap */
+#define REDIS_ENCODING_HT 3     /* Encoded as an hash table */
+
+typedef struct foolObject {
+    void* ptr;
+    unsigned char type;
+    unsigned char encoding;
+    unsigned char storage;
+
+    unsigned char vtypes;
+    int refcount;
+} robj;
 
 typedef struct foolServer {
     pthread_t mainthread;
@@ -30,6 +56,8 @@ typedef struct foolServer {
 typedef struct foolClient {
     int fd;
     sds querybuf;
+    int argc;
+    robj** argv;
 } foolClient;
 
 static foolServer server;
@@ -39,6 +67,9 @@ static void acceptHandler(aeEventLoop* el, int fd, void* privdata, int mask);
 static void redisLog(int level, const char* fmt, ...);
 static void readQueryFromCLient(aeEventLoop* el, int fd, void* privdata, int mask);
 static void freeClient(foolClient* c);
+static void processInputBuffer(foolClient* c);
+static int processCommand(foolClient* c);
+static robj* createObject(int type, void* ptr);
 
 static void initServer()
 {
@@ -87,9 +118,68 @@ static void readQueryFromClient(aeEventLoop* el, int fd, void* privdata, int mas
     else {
         return;
     }
-    // processInputBuffer(c);
+    processInputBuffer(c);
 }
 
+static void processInputBuffer(foolClient* c)
+{
+again : {
+
+    char* p = strchr(c->querybuf, '\n');
+    size_t querylen;
+
+    if (p) {
+        sds query, *argv;
+        int argc, j;
+
+        query = c->querybuf;
+        c->querybuf = sdsempty();
+        querylen = 1 + (p - (query));
+        if (sdslen(query) > querylen) {
+            c->querybuf = sdscatlen(c->querybuf, query + querylen, sdslen(query) - querylen);
+        }
+        *p = '\0';
+        if (*(p - 1) == '\r')
+            *(p - 1) = '\0';
+        sdsupdatelen(query);
+
+        argv = sdssplitlen(query, sdslen(query), " ", 1, &argc);
+        sdsfree(query);
+
+        if (c->argv)
+            zfree(c->argv);
+        c->argv = zmalloc(sizeof(robj*) * argc);
+
+        for (j = 0; j < argc; j++) {
+            if (sdslen(argv[j])) {
+                c->argv[c->argc] = createObject(REDIS_STRING, argv[j]);
+                c->argc++;
+            }
+            else {
+                sdsfree(argv[j]);
+            }
+        }
+        zfree(argv);
+        if (c->argc) {
+            // execute command
+            if (processCommand(c) && sdslen(c->querybuf))
+                goto again;
+        }
+        else {
+            if (sdslen(c->querybuf))
+                goto again;
+        }
+        return;
+    }
+    else if (sdslen(c->querybuf) >= REDIS_REQUEST_MAX_SIZE) {
+        redisLog(REDIS_VERBOSE, "Client protocol error");
+        freeClient(c);
+        return;
+    }
+}
+}
+
+static int processCommand(foolClient* c) { redisLog(REDIS_VERBOSE, "process command\n"); }
 static void freeClient(foolClient* c) { free(c); }
 
 static foolClient* createClient(int fd)
@@ -103,6 +193,8 @@ static foolClient* createClient(int fd)
 
     c->fd = fd;
     c->querybuf = sdsempty();
+    c->argc = 0;
+    c->argv = NULL;
 
     if (aeCreateFileEvent(server.el, c->fd, AE_READABLE, readQueryFromClient, c) == AE_ERR) {
         freeClient(c);
@@ -166,4 +258,14 @@ int main(int argc, char** argv)
     redisLog(REDIS_NOTICE, "The server is now ready to accept connections on port %d", server.port);
     aeMain(server.el);
     return 0;
+}
+
+static robj* createObject(int type, void* ptr)
+{
+    robj* o;
+    o->type = type;
+    o->encoding = REDIS_ENCODING_RAW;
+    o->ptr = ptr;
+    o->refcount = 1;
+    return o;
 }
