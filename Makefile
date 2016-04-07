@@ -5,7 +5,7 @@ CCOPT= $(CFLAGS) $(CCLINK) $(ARCH) $(PROF)
 
 DEBUG?= -g -rdynamic -ggdb 
 
-OBJ = ae.o anet.o fool.o zmalloc.o sds.o
+OBJ = ae.o anet.o fool.o zmalloc.o sds.o dict.o adlist.o
 
 PRGNAME = fool-server
 
@@ -16,6 +16,8 @@ anet.o:anet.c fmacros.h anet.h
 fool.o:fool.c fmacros.h config.h fool.h ae.h anet.h zmalloc.h
 zmalloc.o:zmalloc.c zmalloc.h
 sds.o:sds.c sds.h
+dict.o:dict.c dict.h
+adlist.o:adlist.c adlist.h
 
 fool-server:$(OBJ)
 	$(CC) -o $(PRGNAME) $(CCOPT) $(DEBUG) $(OBJ)
