@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <errno.h>
+#include <limits.h>
 
 #include "fool.h"
 #include "ae.h"
@@ -91,7 +92,7 @@ typedef struct foolClient {
 } foolClient;
 
 struct sharedObjectStruct {
-    robj *crlf, *nullbulk, *wrongtypeerr;
+    robj *crlf, *nullbulk, *wrongtypeerr, *ok;
 } shared;
 
 typedef void foolCommandProc(foolClient* c);
@@ -137,6 +138,7 @@ static robj* getDecodedObject(robj* o);
 static void incrRefCount(robj* o);
 static void freeClientArgv(foolClient* c);
 static void freeListObject(robj* o);
+static int setGenericCommand(foolClient* c, int nx, robj* key, robj* val, robj* expire);
 
 static struct foolCommand cmdTable[] = { { "get", getCommand, 2, REDIS_CMD_INLINE, NULL, 1, 1, 1 }, { "set", setCommand, 3, REDIS_CMD_BULK | REDIS_CMD_DENYOOM, NULL, 0, 0, 0 } };
 
@@ -152,11 +154,9 @@ static void initServer()
     server.stat_connections = 0;
     server.db = zmalloc(sizeof(foolDb));
     server.db->dict = dictCreate(&dbDictType, NULL);
-    robj* key = createObject(REDIS_STRING, sdsnew("hello"));
-    robj* val = createObject(REDIS_STRING, sdsnew("world!"));
-    dictAdd(server.db->dict, key, val);
     server.fd = anetTcpServer(server.neterr, server.port, server.bindaddr);
     server.clients = listCreate();
+    createSharedObjects();
     if (server.fd == -1) {
         sprintf(stderr, "fool tcp open err:%s", server.neterr);
         exit(1);
@@ -378,7 +378,6 @@ static void getCommand(foolClient* c) { getGenericCommand(c); }
 
 static int getGenericCommand(foolClient* c)
 {
-
     robj* o;
     if ((o = lookupKeyReadOrReply(c, c->argv[1], shared.nullbulk)) == NULL)
         return REDIS_OK;
@@ -388,7 +387,6 @@ static int getGenericCommand(foolClient* c)
         return REDIS_ERR;
     }
     else {
-        redisLog(REDIS_NOTICE, "%s\n", o->ptr);
         addReplyBulk(c, o);
         return REDIS_OK;
     }
@@ -396,7 +394,6 @@ static int getGenericCommand(foolClient* c)
 
 static void addReply(foolClient* c, robj* obj)
 {
-    redisLog(REDIS_NOTICE, "%s\n", obj->ptr);
     if (listLength(c->reply) == 0 && aeCreateFileEvent(server.el, c->fd, AE_WRITABLE, sendReplyToClient, c) == AE_ERR) {
         return;
     }
@@ -405,15 +402,12 @@ static void addReply(foolClient* c, robj* obj)
 
 static void sendReplyToClient(aeEventLoop* el, int fd, void* privdata, int mask)
 {
-
     foolClient* c = privdata;
     int nwritten = 0, totwritten = 0, objlen;
     robj* o;
 
     while (listLength(c->reply)) {
-
         o = listNodeValue(listFirst(c->reply));
-
         objlen = sdslen(o->ptr);
 
         if (objlen == 0) {
@@ -426,7 +420,6 @@ static void sendReplyToClient(aeEventLoop* el, int fd, void* privdata, int mask)
         c->sentlen += nwritten;
         totwritten += nwritten;
         if (c->sentlen == objlen) {
-
             listDelNode(c->reply, listFirst(c->reply));
             c->sentlen = 0;
         }
@@ -462,7 +455,24 @@ static robj* lookupKey(foolDb* db, robj* key)
     }
 }
 
-static void setCommand(foolClient* c) {}
+static void setCommand(foolClient* c)
+{
+    // c->argv[2] = tryObjectEncoding(c->argv[2]);
+    setGenericCommand(c, 0, c->argv[1], c->argv[2], NULL);
+}
+
+static int setGenericCommand(foolClient* c, int nx, robj* key, robj* val, robj* expire)
+{
+    if (dictFind(c->db->dict, key) != NULL)
+        return REDIS_ERR;
+    else {
+        sds copy = sdsdup(key->ptr);
+        dictAdd(c->db->dict, createObject(REDIS_STRING, copy), val);
+        incrRefCount(val);
+        addReply(c, shared.ok);
+        return REDIS_OK;
+    }
+}
 
 static void resetClient(foolClient* c) { freeClientArgv(c); }
 
@@ -526,6 +536,7 @@ static void createSharedObjects(void)
     shared.crlf = createObject(REDIS_STRING, sdsnew("\r\n"));
     shared.nullbulk = createObject(REDIS_STRING, sdsnew("$-1\r\n"));
     shared.wrongtypeerr = createObject(REDIS_STRING, sdsnew("-ERR Operation against a key holding the wrong kind of value\r\n"));
+    shared.ok = createObject(REDIS_STRING, sdsnew("+OK\r\n"));
 }
 
 static robj* lookupKeyRead(foolDb* db, robj* key) { return lookupKey(db, key); }
@@ -593,4 +604,4 @@ static robj* getDecodedObject(robj* o)
     }
 }
 
-static void incrRefCount(robj* o) { o->refcount++; };
+static void incrRefCount(robj* o) { o->refcount++; }
