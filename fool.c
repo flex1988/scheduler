@@ -1,110 +1,6 @@
-#include <pthread.h>
-#include <stdio.h>
-#include <stdarg.h>
-#include <errno.h>
-#include <limits.h>
-
 #include "fool.h"
-#include "ae.h"
-#include "sds.h"
-#include "zmalloc.h"
-#include "dict.h"
-#include "adlist.h"
-#include "util.h"
-
-/* Error codes */
-#define REDIS_OK 0
-#define REDIS_ERR -1
-
-/* Log levels */
-#define REDIS_DEBUG 0
-#define REDIS_VERBOSE 1
-#define REDIS_NOTICE 2
-#define REDIS_WARNING 3
-
-#define REDIS_IOBUF_LEN 1024
-#define REDIS_REQUEST_MAX_SIZE (1024 * 1024 * 256) /* max bytes in inline command */
-#define REDIS_MAX_WRITE_PER_EVENT (1024 * 64)
-
-/* Object types */
-#define REDIS_STRING 0
-#define REDIS_LIST 1
-#define REDIS_SET 2
-#define REDIS_ZSET 3
-#define REDIS_HASH 4
-
-/* Objects encoding. Some kind of objects like Strings and Hashes can be
- * internally represented in multiple ways. The 'encoding' field of the object
- * is set to one of this fields for this object. */
-#define REDIS_ENCODING_RAW 0    /* Raw representation */
-#define REDIS_ENCODING_INT 1    /* Encoded as integer */
-#define REDIS_ENCODING_ZIPMAP 2 /* Encoded as zipmap */
-#define REDIS_ENCODING_HT 3     /* Encoded as an hash table */
-
-/* Command flags */
-#define REDIS_CMD_BULK 1   /* Bulk write command */
-#define REDIS_CMD_INLINE 2 /* Inline command */
-                           /* REDIS_CMD_DENYOOM reserves a longer comment: all the commands marked with
-                              this flags will return an error when the 'maxmemory' option is set in the
-                              config file and the server is using more than maxmemory bytes of memory.
-                              In short this commands are denied on low memory conditions. */
-#define REDIS_CMD_DENYOOM 4
-#define REDIS_CMD_FORCE_REPLICATION 8 /* Force replication even if dirty is 0 */
-#define REDIS_CMD_NUM 2
-
-typedef struct foolObject {
-    void* ptr;
-    unsigned char type;
-    unsigned char encoding;
-    unsigned char storage;
-    unsigned char vtypes;
-    int refcount;
-} robj;
-
-typedef struct foolDb {
-    dict* dict;
-    int id;
-} foolDb;
-
-typedef struct foolServer {
-    pthread_t mainthread;
-    int port;
-    int fd;
-    int stat_connections;
-    aeEventLoop* el;
-    char neterr[1024];
-    char* bindaddr;
-    char* logfile;
-    list* clients;
-    foolDb* db;
-} foolServer;
-
-typedef struct foolClient {
-    int fd;
-    sds querybuf;
-    int argc;
-    robj** argv;
-    list* reply;
-    int sentlen;
-    int multibulklen;
-    int bulklen;
-    foolDb* db;
-} foolClient;
-
-struct sharedObjectStruct {
-    robj *crlf, *nullbulk, *wrongtypeerr, *ok;
-} shared;
-
-typedef void foolCommandProc(foolClient* c);
-typedef struct foolCommand {
-    char* name;
-    foolCommandProc* proc;
-    int arity;
-    int flags;
-};
 
 static foolServer server;
-
 // prototype
 static void acceptHandler(aeEventLoop* el, int fd, void* privdata, int mask);
 static void redisLog(int level, const char* fmt, ...);
@@ -122,6 +18,7 @@ static struct foolCommand* lookupCommand(char* cmd);
 static int getGenericCommand(foolClient* c);
 static void getCommand(foolClient* c);
 static void setCommand(foolClient* c);
+static void addCommand(foolClient* c);
 static void resetClient(foolClient* c);
 static void addReplySds(foolClient* c, sds s);
 static robj* lookupKeyReadOrReply(foolClient* c, robj* key, robj* reply);
@@ -139,8 +36,10 @@ static void incrRefCount(robj* o);
 static void freeClientArgv(foolClient* c);
 static void freeListObject(robj* o);
 static int setGenericCommand(foolClient* c, int nx, robj* key, robj* val, robj* expire);
+static int notifyWorker(struct aeEventLoop* eventLoop, long long id, void* clientData);
+static void callWorker(char* addr, int port, char* buf);
 
-static struct foolCommand cmdTable[] = { { "get", getCommand, 2, REDIS_CMD_INLINE, NULL, 1, 1, 1 }, { "set", setCommand, 3, REDIS_CMD_BULK | REDIS_CMD_DENYOOM, NULL, 0, 0, 0 } };
+static struct foolCommand cmdTable[] = { { "get", getCommand, 2, REDIS_CMD_INLINE, NULL, 1, 1, 1 }, { "set", setCommand, 3, REDIS_CMD_BULK | REDIS_CMD_DENYOOM, NULL, 0, 0, 0 }, { "add", addCommand, 5, REDIS_CMD_BULK, NULL, 0, 0, 0 } };
 
 static dictType dbDictType = { dictObjHash, NULL, NULL, dictObjKeyCompare, dictRedisObjectDestructor, dictRedisObjectDestructor };
 
@@ -158,11 +57,11 @@ static void initServer()
     server.clients = listCreate();
     createSharedObjects();
     if (server.fd == -1) {
-        sprintf(stderr, "fool tcp open err:%s", server.neterr);
+        redisLog(REDIS_WARNING, "fool tcp open err:%s", server.neterr);
         exit(1);
     }
     if (aeCreateFileEvent(server.el, server.fd, AE_READABLE, acceptHandler, NULL) == AE_ERR) {
-        sprintf(stderr, "ae read err:%s", server.fd);
+        redisLog(REDIS_WARNING, "ae read err:%s", server.fd);
         exit(1);
     }
 }
@@ -455,10 +354,19 @@ static robj* lookupKey(foolDb* db, robj* key)
     }
 }
 
-static void setCommand(foolClient* c)
+static void setCommand(foolClient* c) { setGenericCommand(c, 0, c->argv[1], c->argv[2], NULL); }
+
+static void callWorker(char* addr, int port, char* buf)
 {
-    // c->argv[2] = tryObjectEncoding(c->argv[2]);
-    setGenericCommand(c, 0, c->argv[1], c->argv[2], NULL);
+    char* err = zmalloc(100 * sizeof(char));
+    int fd;
+    if ((fd = anetTcpConnect(err, addr, port)) == ANET_ERR) {
+        redisLog(REDIS_ERR, "connect error: %s\n", err);
+        zfree(err);
+        return;
+    }
+    anetWrite(fd, buf, sdslen(buf));
+    close(fd);
 }
 
 static int setGenericCommand(foolClient* c, int nx, robj* key, robj* val, robj* expire)
@@ -605,3 +513,31 @@ static robj* getDecodedObject(robj* o)
 }
 
 static void incrRefCount(robj* o) { o->refcount++; }
+
+static void addCommand(foolClient* c)
+{
+    timeEventObject* obj = zmalloc(sizeof(timeEventObject));
+    obj->port = atoi(c->argv[4]->ptr);
+    obj->addr = sdsdup(c->argv[3]->ptr);
+    obj->ttl = atoi(c->argv[2]->ptr);
+    obj->buf = sdsdup(c->argv[5]->ptr);
+    obj->type = strcasecmp("once", c->argv[1]->ptr) == 0 ? TASK_ONCE : TASK_REPEAT;
+    if (aeCreateTimeEvent(server.el, obj->ttl, notifyWorker, obj, NULL) == AE_ERR) {
+        redisLog(REDIS_NOTICE, "redis create task failed\n");
+    }
+    addReply(c, shared.ok);
+}
+
+static int notifyWorker(struct aeEventLoop* eventLoop, long long id, void* clientData)
+{
+    timeEventObject* obj = clientData;
+    callWorker(obj->addr, obj->port, obj->buf);
+    if (obj->type != TASK_ONCE) {
+        if (aeCreateTimeEvent(server.el, obj->ttl, notifyWorker, obj, NULL) == AE_ERR) {
+            redisLog(REDIS_NOTICE, "redis create task failed\n");
+        }
+        return AE_NOMORE;
+    }
+    zfree(obj);
+    return AE_NOMORE;
+}
