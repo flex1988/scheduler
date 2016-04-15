@@ -1,5 +1,5 @@
-#ifndef __FOOL_H__
-#define __FOOL_H__
+#ifndef __SERVER_H__
+#define __SERVER_H__
 
 #include <pthread.h>
 #include <stdio.h>
@@ -7,7 +7,6 @@
 #include <errno.h>
 #include <limits.h>
 
-#include "fool.h"
 #include "ae.h"
 #include "sds.h"
 #include "zmalloc.h"
@@ -66,7 +65,7 @@
 #define TASK_ONCE 1
 #define TASK_REPEAT 2
 
-typedef struct foolObject {
+typedef struct taskObject {
     void* ptr;
     unsigned char type;
     unsigned char encoding;
@@ -75,12 +74,12 @@ typedef struct foolObject {
     int refcount;
 } robj;
 
-typedef struct foolDb {
+typedef struct taskDb {
     dict* dict;
     int id;
-} foolDb;
+} taskDb;
 
-typedef struct foolServer {
+typedef struct taskServer {
     pthread_t mainthread;
     int port;
     int fd;
@@ -90,10 +89,10 @@ typedef struct foolServer {
     char* bindaddr;
     char* logfile;
     list* clients;
-    foolDb* db;
-} foolServer;
+    taskDb* db;
+} taskServer;
 
-typedef struct foolClient {
+typedef struct taskClient {
     int fd;
     sds querybuf;
     int argc;
@@ -102,11 +101,11 @@ typedef struct foolClient {
     int sentlen;
     int multibulklen;
     int bulklen;
-    foolDb* db;
-} foolClient;
+    taskDb* db;
+} taskClient;
 
 struct sharedObjectStruct {
-    robj *crlf, *nullbulk, *wrongtypeerr, *ok;
+    robj *crlf, *nullbulk, *wrongtypeerr, *ok,*notfound;
 } shared;
 
 typedef struct timeEventObject {
@@ -117,12 +116,49 @@ typedef struct timeEventObject {
     int type;
 } timeEventObject;
 
-typedef void foolCommandProc(foolClient* c);
-typedef struct foolCommand {
+typedef void taskCommandProc(taskClient* c);
+typedef struct taskCommand {
     char* name;
-    foolCommandProc* proc;
+    taskCommandProc* proc;
     int arity;
     int flags;
 };
+
+void acceptHandler(aeEventLoop* el, int fd, void* privdata, int mask);
+void redisLog(int level, const char* fmt, ...);
+void call(taskClient* c, struct taskCommand* cmd);
+void readQueryFromCLient(aeEventLoop* el, int fd, void* privdata, int mask);
+void freeClient(taskClient* c);
+void processInputBuffer(taskClient* c);
+int processCommand(taskClient* c);
+robj* createObject(int type, void* ptr);
+void addReply(taskClient* c, robj* obj);
+void sendReplyToClient(aeEventLoop* el, int fd, void* privdata, int mask);
+robj* lookupKey(taskDb* db, robj* key);
+void addReplyBulk(taskClient* c, robj* obj);
+struct taskCommand* lookupCommand(char* cmd);
+int getGenericCommand(taskClient* c);
+void getCommand(taskClient* c);
+void setCommand(taskClient* c);
+void addCommand(taskClient* c);
+void resetClient(taskClient* c);
+void addReplySds(taskClient* c, sds s);
+robj* lookupKeyReadOrReply(taskClient* c, robj* key, robj* reply);
+void createSharedObjects(void);
+void addReplyBulkLen(taskClient* c, robj* obj);
+robj* lookupKeyRead(taskDb* db, robj* key);
+unsigned int dictObjHash(const void* key);
+int dictObjKeyCompare(void* privdata, const void* key1, const void* key2);
+void dictRedisObjectDestructor(void* privdata, void* val);
+void decrRefCount(void* o);
+void freeStringObject(robj* o);
+int sdsDictKeyCompare(void* privdata, const void* key1, const void* key2);
+robj* getDecodedObject(robj* o);
+void incrRefCount(robj* o);
+void freeClientArgv(taskClient* c);
+void freeListObject(robj* o);
+int setGenericCommand(taskClient* c, int nx, robj* key, robj* val, robj* expire);
+int notifyWorker(struct aeEventLoop* eventLoop, long long id, void* clientData);
+void callWorker(char* addr, int port, char* buf);
 
 #endif
