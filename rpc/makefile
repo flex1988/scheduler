@@ -17,4 +17,4 @@ notify_clnt.o: notify_clnt.c notify.h
 notify_clnt.c notify_svc.c notify.h: notify.x
 		rpcgen $(RPCGEN_FLAG) notify.x
 clean:
-		rm -f client notify_client.o server notify_server.o notify_clnt.* notify_svc.* notify.h
+		rm -f client client.o server server.o notify_clnt.* notify_svc.* notify.h
