@@ -127,3 +127,36 @@ const ProtobufCMessageDescriptor notify__test__descriptor =
   (ProtobufCMessageInit) notify__test__init,
   NULL,NULL,NULL    /* reserved[123] */
 };
+static const ProtobufCMethodDescriptor notify__notify_service__method_descriptors[1] =
+{
+  { "Notify", &notify__test__descriptor, &notify__test__descriptor },
+};
+const unsigned notify__notify_service__method_indices_by_name[] = {
+  0         /* Notify */
+};
+const ProtobufCServiceDescriptor notify__notify_service__descriptor =
+{
+  PROTOBUF_C__SERVICE_DESCRIPTOR_MAGIC,
+  "notify.NotifyService",
+  "NotifyService",
+  "Notify__NotifyService",
+  "notify",
+  1,
+  notify__notify_service__method_descriptors,
+  notify__notify_service__method_indices_by_name
+};
+void notify__notify_service__notify(ProtobufCService *service,
+                                    const Notify__Test *input,
+                                    Notify__Test_Closure closure,
+                                    void *closure_data)
+{
+  assert(service->descriptor == &notify__notify_service__descriptor);
+  service->invoke(service, 0, (const ProtobufCMessage *) input, (ProtobufCClosure) closure, closure_data);
+}
+void notify__notify_service__init (Notify__NotifyService_Service *service,
+                                   Notify__NotifyService_ServiceDestroy destroy)
+{
+  protobuf_c_service_generated_init (&service->base,
+                                     &notify__notify_service__descriptor,
+                                     (ProtobufCServiceDestroy) destroy);
+}

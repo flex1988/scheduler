@@ -63,10 +63,32 @@ typedef void (*Notify__Test_Closure)
 
 /* --- services --- */
 
+typedef struct _Notify__NotifyService_Service Notify__NotifyService_Service;
+struct _Notify__NotifyService_Service
+{
+  ProtobufCService base;
+  void (*notify)(Notify__NotifyService_Service *service,
+                 const Notify__Test *input,
+                 Notify__Test_Closure closure,
+                 void *closure_data);
+};
+typedef void (*Notify__NotifyService_ServiceDestroy)(Notify__NotifyService_Service *);
+void notify__notify_service__init (Notify__NotifyService_Service *service,
+                                   Notify__NotifyService_ServiceDestroy destroy);
+#define NOTIFY__NOTIFY_SERVICE__BASE_INIT \
+    { &notify__notify_service__descriptor, protobuf_c_service_invoke_internal, NULL }
+#define NOTIFY__NOTIFY_SERVICE__INIT(function_prefix__) \
+    { NOTIFY__NOTIFY_SERVICE__BASE_INIT,\
+      function_prefix__ ## notify  }
+void notify__notify_service__notify(ProtobufCService *service,
+                                    const Notify__Test *input,
+                                    Notify__Test_Closure closure,
+                                    void *closure_data);
 
 /* --- descriptors --- */
 
 extern const ProtobufCMessageDescriptor notify__test__descriptor;
+extern const ProtobufCServiceDescriptor notify__notify_service__descriptor;
 
 PROTOBUF_C__END_DECLS
 
