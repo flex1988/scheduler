@@ -319,7 +319,7 @@ robj* lookupKey(taskDb* db, robj* key)
 
 void setCommand(taskClient* c) { setGenericCommand(c, 0, c->argv[1], c->argv[2], NULL); }
 
-void callWorker(char* addr, int port, char* buf)
+void callWorker(char* addr, int port, Notify__Test* msg)
 {
     char* err = zmalloc(100 * sizeof(char));
     int fd;
@@ -328,7 +328,7 @@ void callWorker(char* addr, int port, char* buf)
         zfree(err);
         return;
     }
-    anetWrite(fd, buf, sdslen(buf));
+    anetWrite(fd, msg, sdslen(msg));
     close(fd);
 }
 
@@ -485,10 +485,18 @@ void incrRefCount(robj* o) { o->refcount++; }
 void addCommand(taskClient* c)
 {
     timeEventObject* obj = zmalloc(sizeof(timeEventObject));
+
+    Notify__Test msg = NOTIFY__TEST__INIT;
+    msg.program = 1001;
+    msg.version = 1002;
+    msg.method = 1003;
+    msg.str = "hello world";
+
     obj->port = atoi(c->argv[4]->ptr);
     obj->addr = sdsdup(c->argv[3]->ptr);
     obj->ttl = atoi(c->argv[2]->ptr);
     obj->buf = sdsdup(c->argv[5]->ptr);
+    obj->message = &msg;
     obj->type = strcasecmp("once", c->argv[1]->ptr) == 0 ? TASK_ONCE : TASK_REPEAT;
     if (aeCreateTimeEvent(server.el, obj->ttl, notifyWorker, obj, NULL) == AE_ERR) {
         redisLog(REDIS_NOTICE, "redis create task failed\n");
@@ -499,7 +507,7 @@ void addCommand(taskClient* c)
 int notifyWorker(struct aeEventLoop* eventLoop, long long id, void* clientData)
 {
     timeEventObject* obj = clientData;
-    callWorker(obj->addr, obj->port, obj->buf);
+    callWorker(obj->addr, obj->port, obj->message);
     if (obj->type != TASK_ONCE) {
         if (aeCreateTimeEvent(server.el, obj->ttl, notifyWorker, obj, NULL) == AE_ERR) {
             redisLog(REDIS_NOTICE, "redis create task failed\n");

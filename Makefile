@@ -1,6 +1,6 @@
 uname_S := $(shell sh -c 'uname -s 2>/dev/null || echo not')
 OPTIMIZATION?=-O2
-CFLAGS?= -std=c99 -pedantic $(OPTIMIZATION) -Wall -W 
+CFLAGS?= -std=c99 -pedantic $(OPTIMIZATION) -Wall -W -I/usr/local/include
 CCOPT= $(CFLAGS) $(CCLINK) $(ARCH) $(PROF)
 
 DEBUG?= -g -rdynamic -ggdb 
@@ -20,7 +20,7 @@ adlist.o:adlist.c adlist.h
 util.o:util.c util.h
 
 server:$(OBJ)
-	$(CC) -o $(PRGNAME) $(CCOPT) $(DEBUG) $(OBJ)
+	$(CC) -o $(PRGNAME) $(CCOPT) $(DEBUG) $(OBJ) 
 
 clean: 
 	rm *.o server
