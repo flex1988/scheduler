@@ -1,0 +1,8 @@
+ package notify; 
+ message test
+ { 
+    required int32     program = 1;  
+    required int32     version = 2;
+    required int32     method = 3;
+    required string    str = 4; 
+ }
