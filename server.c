@@ -262,6 +262,8 @@ void addReply(taskClient* c, robj* obj)
     listAddNodeTail(c->reply, getDecodedObject(obj));
 }
 
+void addReplytoWorker(timeEventObject* tobj, robj* obj) { addReplyBulkList(tobj->message, obj); }
+
 void sendReplyToClient(aeEventLoop* el, int fd, void* privdata, int mask)
 {
     taskClient* c = privdata;
@@ -319,7 +321,7 @@ robj* lookupKey(taskDb* db, robj* key)
 
 void setCommand(taskClient* c) { setGenericCommand(c, 0, c->argv[1], c->argv[2], NULL); }
 
-void callWorker(char* addr, int port, Notify__Test* msg)
+void callWorker(char* addr, int port, list* msg)
 {
     char* err = zmalloc(100 * sizeof(char));
     int fd;
@@ -328,7 +330,29 @@ void callWorker(char* addr, int port, Notify__Test* msg)
         zfree(err);
         return;
     }
-    anetWrite(fd, msg, sdslen(msg));
+
+    listIter* iter = listGetIterator(msg, AL_START_HEAD);
+    listNode* node = NULL;
+    int nwritten = 0, totwritten = 0, objlen, sentlen = 0;
+    robj* o;
+
+    while (node = listNext(iter)) {
+        o = listNodeValue(node);
+
+        objlen = sdslen(o->ptr);
+        redisLog(REDIS_NOTICE, "write:len:%d  pointer:%s\n", objlen, o->ptr);
+        if (objlen == 0) {
+            continue;
+        }
+        nwritten = write(fd, ((char*)o->ptr) + sentlen, objlen - sentlen);
+        if (nwritten <= 0)
+            break;
+        sentlen += nwritten;
+        totwritten += nwritten;
+        if (sentlen == objlen) {
+            sentlen = 0;
+        }
+    }
     close(fd);
 }
 
@@ -366,6 +390,12 @@ void addReplySds(taskClient* c, sds s)
     decrRefCount(o);
 }
 
+void addReplyList(list* l, sds s)
+{
+    robj* o = createObject(REDIS_STRING, s);
+    listAddNodeTail(l, getDecodedObject(o));
+}
+
 robj* lookupKeyReadOrReply(taskClient* c, robj* key, robj* reply)
 {
     robj* o = lookupKeyRead(c->db, key);
@@ -379,6 +409,13 @@ void addReplyBulk(taskClient* c, robj* obj)
     addReplyBulkLen(c, obj);
     addReply(c, obj);
     addReply(c, shared.crlf);
+}
+
+void addReplyBulkList(list* l, robj* obj)
+{
+    addReplyBulkLenList(l, obj);
+    addReplyList(l, obj->ptr);
+    addReplyList(l, shared.crlf);
 }
 
 void addReplyBulkLen(taskClient* c, robj* obj)
@@ -404,6 +441,32 @@ void addReplyBulkLen(taskClient* c, robj* obj)
     buf[intlen + 1] = '\r';
     buf[intlen + 2] = '\n';
     addReplySds(c, sdsnewlen(buf, intlen + 3));
+}
+
+void addReplyBulkLenList(list* l, robj* obj)
+{
+    size_t len, intlen;
+    char buf[128];
+
+    if (obj->encoding == REDIS_ENCODING_RAW) {
+        len = sdslen(obj->ptr);
+    }
+    else {
+        long n = (long)obj->ptr;
+        len = 1;
+        if (n < 0) {
+            len++;
+            n = -n;
+        }
+        while ((n = n / 10) != 0) {
+            len++;
+        }
+    }
+    buf[0] = '$';
+    intlen = ll2string(buf + 1, sizeof(buf) - 1, (long long)len);
+    buf[intlen + 1] = '\r';
+    buf[intlen + 2] = '\n';
+    addReplyList(l, sdsnewlen(buf, intlen + 3));
 }
 
 void createSharedObjects(void)
@@ -486,18 +549,14 @@ void addCommand(taskClient* c)
 {
     timeEventObject* obj = zmalloc(sizeof(timeEventObject));
 
-    Notify__Test msg = NOTIFY__TEST__INIT;
-    msg.program = 1001;
-    msg.version = 1002;
-    msg.method = 1003;
-    msg.str = "hello world";
-
     obj->port = atoi(c->argv[4]->ptr);
     obj->addr = sdsdup(c->argv[3]->ptr);
     obj->ttl = atoi(c->argv[2]->ptr);
-    obj->buf = sdsdup(c->argv[5]->ptr);
-    obj->message = &msg;
+    obj->message = listCreate();
     obj->type = strcasecmp("once", c->argv[1]->ptr) == 0 ? TASK_ONCE : TASK_REPEAT;
+    redisLog(REDIS_NOTICE, c->argv[5]->ptr);
+    robj* buf = createObject(REDIS_STRING, sdsdup(c->argv[5]->ptr));
+    addReplytoWorker(obj, getDecodedObject(buf));
     if (aeCreateTimeEvent(server.el, obj->ttl, notifyWorker, obj, NULL) == AE_ERR) {
         redisLog(REDIS_NOTICE, "redis create task failed\n");
     }
@@ -507,6 +566,7 @@ void addCommand(taskClient* c)
 int notifyWorker(struct aeEventLoop* eventLoop, long long id, void* clientData)
 {
     timeEventObject* obj = clientData;
+
     callWorker(obj->addr, obj->port, obj->message);
     if (obj->type != TASK_ONCE) {
         if (aeCreateTimeEvent(server.el, obj->ttl, notifyWorker, obj, NULL) == AE_ERR) {
@@ -514,6 +574,8 @@ int notifyWorker(struct aeEventLoop* eventLoop, long long id, void* clientData)
         }
         return AE_NOMORE;
     }
+    zfree(obj->addr);
+    listRelease(obj->message);
     zfree(obj);
     return AE_NOMORE;
 }

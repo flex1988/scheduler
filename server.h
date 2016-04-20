@@ -14,7 +14,6 @@
 #include "adlist.h"
 #include "util.h"
 #include "anet.h"
-#include "rpc/notify.pb-c.h"
 
 /* Object types */
 #define OBJ_STRING 0
@@ -113,9 +112,8 @@ typedef struct timeEventObject {
     int port;
     sds addr;
     int ttl;
-    sds buf;
     int type;
-    Notify__Test *message;
+    list* message;
 } timeEventObject;
 
 typedef void taskCommandProc(taskClient* c);
@@ -161,6 +159,7 @@ void freeClientArgv(taskClient* c);
 void freeListObject(robj* o);
 int setGenericCommand(taskClient* c, int nx, robj* key, robj* val, robj* expire);
 int notifyWorker(struct aeEventLoop* eventLoop, long long id, void* clientData);
-void callWorker(char* addr, int port, Notify__Test* buf);
-
+void callWorker(char* addr, int port, list* message);
+void addReplyBulkList(list* l,robj* obj);
+void addReplyBulkLenList(list *l,robj* obj);
 #endif
