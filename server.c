@@ -3,7 +3,7 @@
 taskServer server;
 // prototype
 
-struct taskCommand cmdTable[] = { { "get", getCommand, 2, REDIS_CMD_INLINE, NULL, 1, 1, 1 }, { "set", setCommand, 3, REDIS_CMD_BULK | REDIS_CMD_DENYOOM, NULL, 0, 0, 0 }, { "add", addCommand, 5, REDIS_CMD_BULK, NULL, 0, 0, 0 } };
+struct taskCommand cmdTable[] = { { "get", getCommand, 2, REDIS_CMD_INLINE, NULL, 1, 1, 1 }, { "set", setCommand, 3, REDIS_CMD_BULK | REDIS_CMD_DENYOOM, NULL, 0, 0, 0 }, { "rpc", rpcCommand, 5, REDIS_CMD_BULK, NULL, 0, 0, 0 } };
 
 dictType dbDictType = { dictObjHash, NULL, NULL, dictObjKeyCompare, dictRedisObjectDestructor, dictRedisObjectDestructor };
 
@@ -32,10 +32,26 @@ void initServer()
 
 int main(int argc, char** argv)
 {
+    daemonize();
     initServer();
     redisLog(REDIS_NOTICE, "The server is now ready to accept connections on port %d", server.port);
     aeMain(server.el);
     return 0;
+}
+
+void daemonize(void)
+{
+    int fd;
+    if (fork() != 0)
+        exit(0);
+
+    setsid();
+
+    if ((fd = open("/dev/null", O_RDWR, 0)) != -1) {
+        dup2(fd, STDIN_FILENO);
+        dup2(fd, STDOUT_FILENO);
+        dup2(fd, STDERR_FILENO);
+    }
 }
 
 void readQueryFromClient(aeEventLoop* el, int fd, void* privdata, int mask)
@@ -340,7 +356,6 @@ void callWorker(char* addr, int port, list* msg)
         o = listNodeValue(node);
 
         objlen = sdslen(o->ptr);
-        redisLog(REDIS_NOTICE, "write:len:%d  pointer:%s\n", objlen, o->ptr);
         if (objlen == 0) {
             continue;
         }
@@ -390,11 +405,7 @@ void addReplySds(taskClient* c, sds s)
     decrRefCount(o);
 }
 
-void addReplyList(list* l, sds s)
-{
-    robj* o = createObject(REDIS_STRING, s);
-    listAddNodeTail(l, getDecodedObject(o));
-}
+void addReplyList(list* l, robj* obj) { listAddNodeTail(l, getDecodedObject(obj)); }
 
 robj* lookupKeyReadOrReply(taskClient* c, robj* key, robj* reply)
 {
@@ -414,7 +425,7 @@ void addReplyBulk(taskClient* c, robj* obj)
 void addReplyBulkList(list* l, robj* obj)
 {
     addReplyBulkLenList(l, obj);
-    addReplyList(l, obj->ptr);
+    addReplyList(l, obj);
     addReplyList(l, shared.crlf);
 }
 
@@ -466,7 +477,7 @@ void addReplyBulkLenList(list* l, robj* obj)
     intlen = ll2string(buf + 1, sizeof(buf) - 1, (long long)len);
     buf[intlen + 1] = '\r';
     buf[intlen + 2] = '\n';
-    addReplyList(l, sdsnewlen(buf, intlen + 3));
+    addReplyList(l, createObject(REDIS_STRING, sdsnewlen(buf, intlen + 3)));
 }
 
 void createSharedObjects(void)
@@ -545,17 +556,16 @@ robj* getDecodedObject(robj* o)
 
 void incrRefCount(robj* o) { o->refcount++; }
 
-void addCommand(taskClient* c)
+void rpcCommand(taskClient* c)
 {
     timeEventObject* obj = zmalloc(sizeof(timeEventObject));
-
-    obj->port = atoi(c->argv[4]->ptr);
-    obj->addr = sdsdup(c->argv[3]->ptr);
+    char* split = strchr(c->argv[3]->ptr, ':');
+    obj->port = atoi(split + 1);
+    obj->addr = sdsnewlen(c->argv[3]->ptr, split - (char*)c->argv[3]->ptr);
     obj->ttl = atoi(c->argv[2]->ptr);
     obj->message = listCreate();
     obj->type = strcasecmp("once", c->argv[1]->ptr) == 0 ? TASK_ONCE : TASK_REPEAT;
-    redisLog(REDIS_NOTICE, c->argv[5]->ptr);
-    robj* buf = createObject(REDIS_STRING, sdsdup(c->argv[5]->ptr));
+    robj* buf = createObject(REDIS_STRING, sdsdup(c->argv[4]->ptr));
     addReplytoWorker(obj, getDecodedObject(buf));
     if (aeCreateTimeEvent(server.el, obj->ttl, notifyWorker, obj, NULL) == AE_ERR) {
         redisLog(REDIS_NOTICE, "redis create task failed\n");
@@ -574,7 +584,6 @@ int notifyWorker(struct aeEventLoop* eventLoop, long long id, void* clientData)
         }
         return AE_NOMORE;
     }
-    zfree(obj->addr);
     listRelease(obj->message);
     zfree(obj);
     return AE_NOMORE;

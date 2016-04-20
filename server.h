@@ -6,6 +6,8 @@
 #include <stdarg.h>
 #include <errno.h>
 #include <limits.h>
+#include <unistd.h>
+#include <fcntl.h>
 
 #include "ae.h"
 #include "sds.h"
@@ -140,7 +142,7 @@ struct taskCommand* lookupCommand(char* cmd);
 int getGenericCommand(taskClient* c);
 void getCommand(taskClient* c);
 void setCommand(taskClient* c);
-void addCommand(taskClient* c);
+void rpcCommand(taskClient* c);
 void resetClient(taskClient* c);
 void addReplySds(taskClient* c, sds s);
 robj* lookupKeyReadOrReply(taskClient* c, robj* key, robj* reply);
@@ -162,4 +164,5 @@ int notifyWorker(struct aeEventLoop* eventLoop, long long id, void* clientData);
 void callWorker(char* addr, int port, list* message);
 void addReplyBulkList(list* l,robj* obj);
 void addReplyBulkLenList(list *l,robj* obj);
+void daemonize(void);
 #endif

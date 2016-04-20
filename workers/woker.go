@@ -7,7 +7,7 @@ import (
 
 func check(err error) {
 	if err != nil {
-		fmt.Println("error: %s", err.Error())
+		fmt.Println("error:", err.Error())
 	}
 }
 
@@ -16,13 +16,23 @@ func main() {
 	check(err)
 	for {
 		conn, err := listener.Accept()
-		fmt.Println("accept clients")
+		fmt.Println("accept client")
 		check(err)
 		go func(conn net.Conn) {
-			buf := make([]byte, 1024)
-			_, err := conn.Read(buf)
-			check(err)
-			fmt.Println(string(buf))
+			/*reader := bufio.NewReader(conn)*/
+			//head, err := reader.ReadString('\n')
+			//head = head[1 : len(head)-2]
+			//fmt.Println(head)
+			//check(err)
+			//size, err := strconv.Atoi(head[1:])
+			//check(err)
+			//var data = make([]byte, size)
+			//str := io.LimitReader(reader, int64(size))
+			//data, err = ioutil.ReadAll(str)
+			/*check(err)*/
+			var data = make([]byte, 1024)
+			conn.Read(data)
+			fmt.Println(string(data))
 			conn.Close()
 		}(conn)
 	}

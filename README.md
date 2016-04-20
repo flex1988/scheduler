@@ -1,13 +1,15 @@
 ## REDIS TASK
 redis task is a schedule task control program based on redis.
 
-1. add once 1000 localhost 8001 param
-2. add repeat 1000 localhost 8001 param
+1. rpc once 1000 localhost:8001 message
+2. rpc repeat 1000 localhost:8001 message
 3. job once 1000 ~/t
 
 ### COMMAND
 
-addonce 1000 localhost:8081 param
+1. rpc once 1000 localhost:8001 message
+2. rpc repeat 1000 localhost:8001 message
+3. job once 1000 ~/t
 
 ### TODO
 
