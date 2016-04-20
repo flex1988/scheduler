@@ -204,9 +204,9 @@ void acceptHandler(aeEventLoop* el, int fd, void* privdata, int mask)
         redisLog(REDIS_VERBOSE, "Accepting client connection: %s", server.neterr);
         return;
     }
-    redisLog(REDIS_VERBOSE, "Accepted %s:%d", cip, cport);
+    redisLog(REDIS_VERBOSE, "Accepted %s:%d %d", cip, cport, cfd);
     if ((c = createClient(cfd)) == NULL) {
-        redisLog(REDIS_WARNING, "Error allocating resources for the client");
+        redisLog(REDIS_WARNING, "Error allocating client: %s", strerror(errno));
         close(cfd);
         return;
     }
