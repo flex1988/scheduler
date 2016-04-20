@@ -3,6 +3,7 @@
 
 #include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdarg.h>
 #include <errno.h>
 #include <limits.h>
@@ -143,6 +144,7 @@ int getGenericCommand(taskClient* c);
 void getCommand(taskClient* c);
 void setCommand(taskClient* c);
 void rpcCommand(taskClient* c);
+void delCommand(taskClient* c);
 void resetClient(taskClient* c);
 void addReplySds(taskClient* c, sds s);
 robj* lookupKeyReadOrReply(taskClient* c, robj* key, robj* reply);
@@ -160,6 +162,7 @@ void incrRefCount(robj* o);
 void freeClientArgv(taskClient* c);
 void freeListObject(robj* o);
 int setGenericCommand(taskClient* c, int nx, robj* key, robj* val, robj* expire);
+int delGenericCommand(taskClient* c);
 int notifyWorker(struct aeEventLoop* eventLoop, long long id, void* clientData);
 void callWorker(char* addr, int port, list* message);
 void addReplyBulkList(list* l,robj* obj);

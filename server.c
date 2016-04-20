@@ -3,7 +3,7 @@
 taskServer server;
 // prototype
 
-struct taskCommand cmdTable[] = { { "get", getCommand, 2, REDIS_CMD_INLINE, NULL, 1, 1, 1 }, { "set", setCommand, 3, REDIS_CMD_BULK | REDIS_CMD_DENYOOM, NULL, 0, 0, 0 }, { "rpc", rpcCommand, 5, REDIS_CMD_BULK, NULL, 0, 0, 0 } };
+struct taskCommand cmdTable[] = { { "get", getCommand, 2, REDIS_CMD_INLINE, NULL, 1, 1, 1 }, { "rpc", rpcCommand, 5, REDIS_CMD_BULK, NULL, 0, 0, 0 }, { "del", delCommand, 2, REDIS_CMD_INLINE, NULL, 1, 1, 1 } };
 
 dictType dbDictType = { dictObjHash, NULL, NULL, dictObjKeyCompare, dictRedisObjectDestructor, dictRedisObjectDestructor };
 
@@ -32,7 +32,8 @@ void initServer()
 
 int main(int argc, char** argv)
 {
-    daemonize();
+    if (argc > 1 && strcasecmp(argv[1], "--daemonize") == 0)
+        daemonize();
     initServer();
     redisLog(REDIS_NOTICE, "The server is now ready to accept connections on port %d", server.port);
     aeMain(server.el);
@@ -253,6 +254,7 @@ robj* createObject(int type, void* ptr)
 }
 
 void getCommand(taskClient* c) { getGenericCommand(c); }
+void delCommand(taskClient* c) { delGenericCommand(c); }
 
 int getGenericCommand(taskClient* c)
 {
@@ -268,6 +270,14 @@ int getGenericCommand(taskClient* c)
         addReplyBulk(c, o);
         return REDIS_OK;
     }
+}
+
+int delGenericCommand(taskClient* c)
+{
+    long long timeId = atoi(c->argv[1]->ptr);
+    aeDeleteTimeEvent(server.el, timeId);
+    addReply(c, shared.ok);
+    return REDIS_OK;
 }
 
 void addReply(taskClient* c, robj* obj)
@@ -567,22 +577,21 @@ void rpcCommand(taskClient* c)
     obj->type = strcasecmp("once", c->argv[1]->ptr) == 0 ? TASK_ONCE : TASK_REPEAT;
     robj* buf = createObject(REDIS_STRING, sdsdup(c->argv[4]->ptr));
     addReplytoWorker(obj, getDecodedObject(buf));
-    if (aeCreateTimeEvent(server.el, obj->ttl, notifyWorker, obj, NULL) == AE_ERR) {
+    long long timeId;
+    char time[33];
+    if ((timeId = aeCreateTimeEvent(server.el, obj->ttl, notifyWorker, obj, NULL)) == AE_ERR) {
         redisLog(REDIS_NOTICE, "redis create task failed\n");
     }
-    addReply(c, shared.ok);
+    sprintf(time, "%d", timeId);
+    addReply(c, createObject(REDIS_STRING, sdscatprintf(sdsempty(), "+OK timeEventId:%s\r\n", time)));
 }
 
 int notifyWorker(struct aeEventLoop* eventLoop, long long id, void* clientData)
 {
     timeEventObject* obj = clientData;
-
     callWorker(obj->addr, obj->port, obj->message);
     if (obj->type != TASK_ONCE) {
-        if (aeCreateTimeEvent(server.el, obj->ttl, notifyWorker, obj, NULL) == AE_ERR) {
-            redisLog(REDIS_NOTICE, "redis create task failed\n");
-        }
-        return AE_NOMORE;
+        return obj->ttl;
     }
     listRelease(obj->message);
     zfree(obj);
