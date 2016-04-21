@@ -572,7 +572,17 @@ void rpcCommand(taskClient* c)
     char* split = strchr(c->argv[3]->ptr, ':');
     obj->port = atoi(split + 1);
     obj->addr = sdsnewlen(c->argv[3]->ptr, split - (char*)c->argv[3]->ptr);
-    obj->ttl = atoi(c->argv[2]->ptr);
+
+    long long milliseconds;
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    milliseconds = tv.tv_sec * 1000 + tv.tv_usec / 1000;
+    long long eventMilliSeconds = atoll(c->argv[2]->ptr);
+    if (eventMilliSeconds > milliseconds)
+        obj->ttl = eventMilliSeconds - milliseconds;
+    else
+        obj->ttl = eventMilliSeconds;
+
     obj->message = listCreate();
     obj->type = strcasecmp("once", c->argv[1]->ptr) == 0 ? TASK_ONCE : TASK_REPEAT;
     robj* buf = createObject(REDIS_STRING, sdsdup(c->argv[4]->ptr));

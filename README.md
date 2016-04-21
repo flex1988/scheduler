@@ -9,7 +9,7 @@ redis task is a schedule task control program based on redis.
 
 #### RPC MESSAGE NOTIFY
 
-notify wokers via tcp protocol serialize user message in RESP.
+notify wokers via tcp protocol and serialize user message in RESP.
 
 1. rpc once 1000 localhost:8001 {message}
 
@@ -17,6 +17,8 @@ notify wokers via tcp protocol serialize user message in RESP.
     every timeEvent will has a timeId
     you can delete it use del command
     during server run time every timeEvent will has unique timeId
+
+    rpc once 1461216640000 localhost:8001 {message}
 
 2. rpc repeat 1000 localhost:8001 {message}
 

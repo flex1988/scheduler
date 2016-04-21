@@ -69,6 +69,8 @@
 #define TASK_ONCE 1
 #define TASK_REPEAT 2
 
+#define REDIS_MIN_TIMESTAMP 1400000000
+
 typedef struct taskObject {
     void* ptr;
     unsigned char type;
