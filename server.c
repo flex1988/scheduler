@@ -592,7 +592,7 @@ void rpcCommand(taskClient* c)
     if ((timeId = aeCreateTimeEvent(server.el, obj->ttl, notifyWorker, obj, NULL)) == AE_ERR) {
         redisLog(REDIS_NOTICE, "redis create task failed\n");
     }
-    sprintf(time, "%d", timeId);
+    sprintf(time, "%lld", timeId);
     addReply(c, createObject(REDIS_STRING, sdscatprintf(sdsempty(), "+OK timeEventId:%s\r\n", time)));
 }
 
