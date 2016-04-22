@@ -161,9 +161,26 @@ void call(taskClient* c, struct taskCommand* cmd) { cmd->proc(c); }
 void freeClient(taskClient* c)
 {
     redisLog(REDIS_NOTICE, "release");
+    unlinkClient(c);
     listRelease(c->reply);
     close(c->fd);
     zfree(c);
+}
+
+void unlinkClient(taskClient* c)
+{
+    listNode* ln;
+    if (c->fd != -1) {
+        /* Remove from the list of active clients. */
+        ln = listSearchKey(server.clients, c);
+        listDelNode(server.clients, ln);
+
+        /* Unregister async I/O handlers and close the socket. */
+        aeDeleteFileEvent(server.el, c->fd, AE_READABLE);
+        aeDeleteFileEvent(server.el, c->fd, AE_WRITABLE);
+        close(c->fd);
+        c->fd = -1;
+    }
 }
 
 taskClient* createClient(int fd)
