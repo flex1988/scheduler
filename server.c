@@ -10,7 +10,7 @@ dictType dbDictType = { dictObjHash, NULL, NULL, dictObjKeyCompare, dictRedisObj
 void initServer()
 {
     server.mainthread = pthread_self();
-    server.el = aeCreateEventLoop();
+    server.el = aeCreateEventLoop(1024 * 10);
     server.port = 6379;
     server.bindaddr = "127.0.0.1";
     server.logfile = NULL;
