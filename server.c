@@ -160,6 +160,7 @@ void call(taskClient* c, struct taskCommand* cmd) { cmd->proc(c); }
 
 void freeClient(taskClient* c)
 {
+    redisLog(REDIS_NOTICE, "release");
     listRelease(c->reply);
     close(c->fd);
     zfree(c);
@@ -174,6 +175,12 @@ taskClient* createClient(int fd)
     if (!c)
         return NULL;
 
+    if (aeCreateFileEvent(server.el, fd, AE_READABLE, readQueryFromClient, c) == AE_ERR) {
+        close(fd);
+        zfree(c);
+        return NULL;
+    }
+
     c->fd = fd;
     c->querybuf = sdsempty();
     c->argc = 0;
@@ -184,11 +191,6 @@ taskClient* createClient(int fd)
     c->db = server.db;
     c->reply = listCreate();
     listSetFreeMethod(c->reply, decrRefCount);
-
-    if (aeCreateFileEvent(server.el, c->fd, AE_READABLE, readQueryFromClient, c) == AE_ERR) {
-        freeClient(c);
-        return NULL;
-    }
     listAddNodeTail(server.clients, c);
     return c;
 }
