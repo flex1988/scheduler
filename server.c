@@ -160,7 +160,6 @@ void call(taskClient* c, struct taskCommand* cmd) { cmd->proc(c); }
 
 void freeClient(taskClient* c)
 {
-    redisLog(REDIS_NOTICE, "release");
     unlinkClient(c);
     listRelease(c->reply);
     close(c->fd);
