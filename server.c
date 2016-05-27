@@ -579,11 +579,19 @@ void rpcCommand(taskClient* c)
     addReplytoWorker(obj, getDecodedObject(buf));
     long long timeId;
     char time[33];
-    if ((timeId = aeCreateTimeEvent(server.el, obj->ttl, notifyWorker, obj, NULL)) == AE_ERR) {
+    if ((timeId = aeCreateTimeEvent(server.el, obj->ttl, notifyWorker, obj, finalizerTimeEvent)) == AE_ERR) {
         redisLog(REDIS_NOTICE, "redis create task failed\n");
     }
-    sprintf(time, "%d", timeId);
+    sprintf(time, "%lld", timeId);
     addReply(c, createObject(REDIS_STRING, sdscatprintf(sdsempty(), "+OK timeEventId:%s\r\n", time)));
+}
+
+void finalizerTimeEvent(struct aeEventLoop* eventLoop, void* clientData)
+{
+    timeEventObject* obj = (timeEventObject*)clientData;
+    sdsfree(obj->addr);
+    listRelease(obj->message);
+    zfree(obj);
 }
 
 int notifyWorker(struct aeEventLoop* eventLoop, long long id, void* clientData)
@@ -593,7 +601,5 @@ int notifyWorker(struct aeEventLoop* eventLoop, long long id, void* clientData)
     if (obj->type != TASK_ONCE) {
         return obj->ttl;
     }
-    listRelease(obj->message);
-    zfree(obj);
     return AE_NOMORE;
 }

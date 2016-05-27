@@ -169,4 +169,5 @@ void callWorker(char* addr, int port, list* message);
 void addReplyBulkList(list* l,robj* obj);
 void addReplyBulkLenList(list *l,robj* obj);
 void daemonize(void);
+void finalizerTimeEvent(struct aeEventLoop* eventLoop, void* clientData);
 #endif

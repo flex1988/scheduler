@@ -1,6 +1,6 @@
 uname_S := $(shell sh -c 'uname -s 2>/dev/null || echo not')
-OPTIMIZATION?=-O2
-CFLAGS?= -std=c99 -pedantic $(OPTIMIZATION) -Wall -W 
+OPTIMIZATION?=-O0
+CFLAGS?= -std=c99 -pedantic $(OPTIMIZATION) -Wall -W -g
 CCOPT= $(CFLAGS) $(CCLINK) $(ARCH) $(PROF)
 
 DEBUG?= -g -rdynamic -ggdb 
