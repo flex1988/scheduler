@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <string.h>
+#include <sys/time.h>
 
 #include "ae.h"
 #include "sds.h"
@@ -68,6 +69,8 @@
 
 #define TASK_ONCE 1
 #define TASK_REPEAT 2
+
+#define REDIS_MIN_TIMESTAMP 1400000000
 
 typedef struct taskObject {
     void* ptr;
@@ -170,4 +173,5 @@ void addReplyBulkList(list* l,robj* obj);
 void addReplyBulkLenList(list *l,robj* obj);
 void daemonize(void);
 void finalizerTimeEvent(struct aeEventLoop* eventLoop, void* clientData);
+void unlinkClient(taskClient* c);
 #endif

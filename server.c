@@ -10,7 +10,7 @@ dictType dbDictType = { dictObjHash, NULL, NULL, dictObjKeyCompare, dictRedisObj
 void initServer()
 {
     server.mainthread = pthread_self();
-    server.el = aeCreateEventLoop();
+    server.el = aeCreateEventLoop(1024 * 10);
     server.port = 6379;
     server.bindaddr = "127.0.0.1";
     server.logfile = NULL;
@@ -160,9 +160,26 @@ void call(taskClient* c, struct taskCommand* cmd) { cmd->proc(c); }
 
 void freeClient(taskClient* c)
 {
+    unlinkClient(c);
     listRelease(c->reply);
     close(c->fd);
     zfree(c);
+}
+
+void unlinkClient(taskClient* c)
+{
+    listNode* ln;
+    if (c->fd != -1) {
+        /* Remove from the list of active clients. */
+        ln = listSearchKey(server.clients, c);
+        listDelNode(server.clients, ln);
+
+        /* Unregister async I/O handlers and close the socket. */
+        aeDeleteFileEvent(server.el, c->fd, AE_READABLE);
+        aeDeleteFileEvent(server.el, c->fd, AE_WRITABLE);
+        close(c->fd);
+        c->fd = -1;
+    }
 }
 
 taskClient* createClient(int fd)
@@ -174,6 +191,12 @@ taskClient* createClient(int fd)
     if (!c)
         return NULL;
 
+    if (aeCreateFileEvent(server.el, fd, AE_READABLE, readQueryFromClient, c) == AE_ERR) {
+        close(fd);
+        zfree(c);
+        return NULL;
+    }
+
     c->fd = fd;
     c->querybuf = sdsempty();
     c->argc = 0;
@@ -184,11 +207,6 @@ taskClient* createClient(int fd)
     c->db = server.db;
     c->reply = listCreate();
     listSetFreeMethod(c->reply, decrRefCount);
-
-    if (aeCreateFileEvent(server.el, c->fd, AE_READABLE, readQueryFromClient, c) == AE_ERR) {
-        freeClient(c);
-        return NULL;
-    }
     listAddNodeTail(server.clients, c);
     return c;
 }
@@ -572,7 +590,17 @@ void rpcCommand(taskClient* c)
     char* split = strchr(c->argv[3]->ptr, ':');
     obj->port = atoi(split + 1);
     obj->addr = sdsnewlen(c->argv[3]->ptr, split - (char*)c->argv[3]->ptr);
-    obj->ttl = atoi(c->argv[2]->ptr);
+
+    long long milliseconds;
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    milliseconds = tv.tv_sec * 1000 + tv.tv_usec / 1000;
+    long long eventMilliSeconds = atoll(c->argv[2]->ptr);
+    if (eventMilliSeconds > milliseconds)
+        obj->ttl = eventMilliSeconds - milliseconds;
+    else
+        obj->ttl = eventMilliSeconds;
+
     obj->message = listCreate();
     obj->type = strcasecmp("once", c->argv[1]->ptr) == 0 ? TASK_ONCE : TASK_REPEAT;
     robj* buf = createObject(REDIS_STRING, sdsdup(c->argv[4]->ptr));
