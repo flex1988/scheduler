@@ -124,6 +124,7 @@ typedef struct timeEventObject {
 } timeEventObject;
 
 typedef void taskCommandProc(taskClient* c);
+
 typedef struct taskCommand {
     char* name;
     taskCommandProc* proc;

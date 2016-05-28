@@ -50,6 +50,8 @@
 /* Macros */
 #define AE_NOTUSED(V) ((void) V)
 
+#include "skiplist.h"
+
 struct aeEventLoop;
 
 /* Types and data structures */
@@ -92,6 +94,7 @@ typedef struct aeEventLoop {
     aeFileEvent *events; /* Registered events */
     aeFiredEvent *fired; /* Fired events */
     aeTimeEvent *timeEventHead;
+    skiplist *timeEventList;
     int stop;
     void *apidata; /* This is used for polling API specific data */
     aeBeforeSleepProc *beforesleep;
@@ -116,5 +119,4 @@ char *aeGetApiName(void);
 void aeSetBeforeSleepProc(aeEventLoop *eventLoop, aeBeforeSleepProc *beforesleep);
 int aeGetSetSize(aeEventLoop *eventLoop);
 int aeResizeSetSize(aeEventLoop *eventLoop, int setsize);
-
 #endif
