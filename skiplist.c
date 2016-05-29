@@ -24,3 +24,30 @@ skiplistNode* createSkiplistNode(int level, double score, void* obj)
     node->score = score;
     return node;
 }
+
+void freeSkiplist(skiplist* sl)
+{
+    skiplistNode *node = sl->header->level[0].forward, *next;
+    zfree(sl->header);
+    while (node) {
+        next = node->level[0].forward;
+        freeSkiplistNode(node);
+        node = next;
+    }
+    zfree(sl);
+}
+
+void freeSkiplistNode(skiplistNode* node)
+{
+    // node->obj must not be referenced
+    zfree(node->obj);
+    zfree(node);
+}
+
+int skiplistRandomLevel(void)
+{
+    int level = 1;
+    while ((random() & 0xFFFF) < (SKIPLIST_P * 0xFFFF))
+        level += 1;
+    return (level < SKIPLIST_MAXLEVEL) ? level : SKIPLIST_MAXLEVEL;
+}
