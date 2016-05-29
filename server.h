@@ -99,6 +99,7 @@ typedef struct taskServer {
     char* logfile;
     list* clients;
     taskDb* db;
+    dict *timer_dict;
 } taskServer;
 
 typedef struct taskClient {
@@ -111,10 +112,11 @@ typedef struct taskClient {
     int multibulklen;
     int bulklen;
     taskDb* db;
+    robj timeId;
 } taskClient;
 
 struct sharedObjectStruct {
-    robj *crlf, *nullbulk, *wrongtypeerr, *ok,*notfound;
+    robj *crlf, *nullbulk, *wrongtypeerr, *ok,*notfound,*internelerr;
 } shared;
 
 typedef struct timeEventObject {

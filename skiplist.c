@@ -1,31 +1,38 @@
 #include <stdlib.h>
 #include "skiplist.h"
 #include "zmalloc.h"
+#include <stdlib.h>
 
-skiplist* createSkiplist(void)
+skiplist*
+createSkiplist(void)
 {
     skiplist* sl;
     int j;
     sl = zmalloc(sizeof(*sl));
     sl->level = 1;
     sl->length = 0;
-    sl->header = createSkiplistNode(SKIPLIST_MAXLEVEL, 0, NULL);
+    sl->header = createSkiplistNode(SKIPLIST_MAXLEVEL, 0, NULL, -1);
     for (j = 0; j < SKIPLIST_MAXLEVEL; j++) {
         sl->header->level[j].forward = NULL;
         sl->header->level[j].span = 0;
     }
+    sl->dict = dictCreate(&dictTypeHeapStrings, NULL);
     return sl;
 }
 
-skiplistNode* createSkiplistNode(int level, double score, void* obj)
+skiplistNode*
+createSkiplistNode(int level, long long score, void* obj, long long id)
 {
-    skiplistNode* node = zmalloc(sizeof(*node) + level * sizeof(struct skiplistLevel));
+    skiplistNode* node =
+      zmalloc(sizeof(*node) + level * sizeof(struct skiplistLevel));
     node->obj = obj;
     node->score = score;
+    node->id = id;
     return node;
 }
 
-void freeSkiplist(skiplist* sl)
+void
+freeSkiplist(skiplist* sl)
 {
     skiplistNode *node = sl->header->level[0].forward, *next;
     zfree(sl->header);
@@ -34,17 +41,20 @@ void freeSkiplist(skiplist* sl)
         freeSkiplistNode(node);
         node = next;
     }
+    dictRelease(sl->dict);
     zfree(sl);
 }
 
-void freeSkiplistNode(skiplistNode* node)
+void
+freeSkiplistNode(skiplistNode* node)
 {
     // node->obj must not be referenced
     zfree(node->obj);
     zfree(node);
 }
 
-int skiplistRandomLevel(void)
+int
+skiplistRandomLevel(void)
 {
     int level = 1;
     while ((random() & 0xFFFF) < (SKIPLIST_P * 0xFFFF))
@@ -52,7 +62,8 @@ int skiplistRandomLevel(void)
     return (level < SKIPLIST_MAXLEVEL) ? level : SKIPLIST_MAXLEVEL;
 }
 
-skiplistNode* skiplistInsert(skiplist* sl, double score, void* obj)
+skiplistNode*
+skiplistInsert(skiplist* sl, long long score, void* obj, long long id)
 {
     skiplistNode *update[SKIPLIST_MAXLEVEL], *x;
     unsigned int rank[SKIPLIST_MAXLEVEL];
@@ -78,7 +89,7 @@ skiplistNode* skiplistInsert(skiplist* sl, double score, void* obj)
         sl->level = level;
     }
 
-    x = createSkiplistNode(level, score, obj);
+    x = createSkiplistNode(level, score, obj, id);
     for (i = 0; i < level; i++) {
         x->level[i].forward = update[i]->level[i].forward;
         update[i]->level[i].forward = x;
@@ -91,18 +102,19 @@ skiplistNode* skiplistInsert(skiplist* sl, double score, void* obj)
         update[i]->level[i].span++;
     }
     sl->length++;
+
     return x;
 }
 
-void skiplistDeleteNode(skiplist* sl, skiplistNode* x, skiplistNode** update)
+void
+skiplistDeleteNode(skiplist* sl, skiplistNode* x, skiplistNode** update)
 {
     int i;
     for (i = 0; i < sl->level; i++) {
         if (update[i]->level[i].forward == x) {
             update[i]->level[i].span += x->level[i].span - 1;
             update[i]->level[i].forward = x->level[i].forward;
-        }
-        else {
+        } else {
             update[i]->level[i].span -= 1;
         }
     }
@@ -111,7 +123,8 @@ void skiplistDeleteNode(skiplist* sl, skiplistNode* x, skiplistNode** update)
     sl->length--;
 }
 
-int skiplistDelete(skiplist* sl, double score, void* obj)
+int
+skiplistDelete(skiplist* sl, long long score, long long id)
 {
     skiplistNode *update[SKIPLIST_MAXLEVEL], *x;
     int i;
@@ -123,10 +136,28 @@ int skiplistDelete(skiplist* sl, double score, void* obj)
         update[i] = x;
     }
     x = x->level[0].forward;
-    if (x && score == x->score) {
-        skiplistDeleteNode(sl, x, update);
-        freeSkiplistNode(x);
-        return 1;
+    while (x && score == x->score) {
+        if (x->id == id) {
+            skiplistDeleteNode(sl, x, update);
+            freeSkiplistNode(x);
+            return 1;
+        } else {
+            x = x->level[0].forward;
+        }
     }
     return 0;
+}
+
+int
+skiplistDeleteHeader(skiplist* sl)
+{
+    skiplistNode* x = sl->header;
+    int i;
+    if (!x->level[0].forward) return SKIP_OK;
+    for (i = 0; i < SKIPLIST_MAXLEVEL; i++) {
+        x->level[i].forward = x->level[i].forward->level[i].forward;
+        x->level[i].span += x->level[i].forward->level[i].span - 1;
+    }
+    freeSkiplistNode(x->level[0].forward);
+    return SKIP_OK;
 }
