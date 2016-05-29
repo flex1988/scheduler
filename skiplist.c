@@ -2,14 +2,14 @@
 #include "skiplist.h"
 #include "zmalloc.h"
 
-skiplist* createList(void)
+skiplist* createSkiplist(void)
 {
     skiplist* sl;
     int j;
     sl = zmalloc(sizeof(*sl));
     sl->level = 1;
     sl->length = 0;
-    sl->header = createNode(SKIPLIST_MAXLEVEL, 0, NULL);
+    sl->header = createSkiplistNode(SKIPLIST_MAXLEVEL, 0, NULL);
     for (j = 0; j < SKIPLIST_MAXLEVEL; j++) {
         sl->header->level[j].forward = NULL;
         sl->header->level[j].span = 0;
@@ -17,7 +17,7 @@ skiplist* createList(void)
     return sl;
 }
 
-skiplistNode* createNode(int level, double score, void* obj)
+skiplistNode* createSkiplistNode(int level, double score, void* obj)
 {
     skiplistNode* node = zmalloc(sizeof(*node) + level * sizeof(struct skiplistLevel));
     node->obj = obj;

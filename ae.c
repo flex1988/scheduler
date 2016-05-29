@@ -75,6 +75,7 @@ aeEventLoop* aeCreateEventLoop(int setsize)
     eventLoop->lastTime = time(NULL);
     eventLoop->timeEventHead = NULL;
     eventLoop->timeEventNextId = 0;
+    eventLoop->timeEventSkiplist = createSkiplist();
     eventLoop->stop = 0;
     eventLoop->maxfd = -1;
     eventLoop->beforesleep = NULL;
