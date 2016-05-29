@@ -18,7 +18,7 @@ sds.o:sds.c sds.h
 dict.o:dict.c dict.h
 adlist.o:adlist.c adlist.h
 util.o:util.c util.h
-skiplist.o:skiplist.c skiplist.h
+skiplist.o:skiplist.c skiplist.h 
 
 server:$(OBJ)
 	$(CC) -o $(PRGNAME) $(CCOPT) $(DEBUG) $(OBJ) 

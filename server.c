@@ -57,7 +57,8 @@ void daemonize(void)
 
 void readQueryFromClient(aeEventLoop* el, int fd, void* privdata, int mask)
 {
-
+    UNUSED(el);
+    UNUSED(mask);
     taskClient* c = (taskClient*)privdata;
     char buf[REDIS_IOBUF_LEN];
     int nread;
@@ -213,6 +214,9 @@ taskClient* createClient(int fd)
 
 void acceptHandler(aeEventLoop* el, int fd, void* privdata, int mask)
 {
+    UNUSED(el);
+    UNUSED(privdata);
+    UNUSED(mask);
     int cport, cfd;
     char cip[128];
     taskClient* c;
@@ -310,6 +314,8 @@ void addReplytoWorker(timeEventObject* tobj, robj* obj) { addReplyBulkList(tobj-
 
 void sendReplyToClient(aeEventLoop* el, int fd, void* privdata, int mask)
 {
+    UNUSED(el);
+    UNUSED(mask);
     taskClient* c = privdata;
     int nwritten = 0, totwritten = 0, objlen;
     robj* o;
@@ -380,7 +386,7 @@ void callWorker(char* addr, int port, list* msg)
     int nwritten = 0, totwritten = 0, objlen, sentlen = 0;
     robj* o;
 
-    while (node = listNext(iter)) {
+    while ((node = listNext(iter))) {
         o = listNodeValue(node);
 
         objlen = sdslen(o->ptr);
@@ -401,6 +407,8 @@ void callWorker(char* addr, int port, list* msg)
 
 int setGenericCommand(taskClient* c, int nx, robj* key, robj* val, robj* expire)
 {
+    UNUSED(nx);
+    UNUSED(expire);
     if (dictFind(c->db->dict, key) != NULL) {
         dictReplace(c->db->dict, key, val);
         incrRefCount(val);
@@ -533,6 +541,7 @@ int dictObjKeyCompare(void* privdata, const void* key1, const void* key2)
 
 void dictRedisObjectDestructor(void* privdata, void* val)
 {
+    UNUSED(privdata);
     if (val == NULL)
         return;
     decrRefCount(val);
@@ -565,6 +574,7 @@ void freeStringObject(robj* obj)
 
 int sdsDictKeyCompare(void* privdata, const void* key1, const void* key2)
 {
+    UNUSED(privdata);
     int l1, l2;
     l1 = sdslen((sds)key1);
     l2 = sdslen((sds)key2);
@@ -575,7 +585,6 @@ int sdsDictKeyCompare(void* privdata, const void* key1, const void* key2)
 
 robj* getDecodedObject(robj* o)
 {
-    robj* dec;
     if (o->encoding == REDIS_ENCODING_RAW) {
         incrRefCount(o);
         return o;
@@ -616,6 +625,7 @@ void rpcCommand(taskClient* c)
 
 void finalizerTimeEvent(struct aeEventLoop* eventLoop, void* clientData)
 {
+    UNUSED(eventLoop);
     timeEventObject* obj = (timeEventObject*)clientData;
     sdsfree(obj->addr);
     listRelease(obj->message);
@@ -624,6 +634,8 @@ void finalizerTimeEvent(struct aeEventLoop* eventLoop, void* clientData)
 
 int notifyWorker(struct aeEventLoop* eventLoop, long long id, void* clientData)
 {
+    UNUSED(eventLoop);
+    UNUSED(id);
     timeEventObject* obj = clientData;
     callWorker(obj->addr, obj->port, obj->message);
     if (obj->type != TASK_ONCE) {

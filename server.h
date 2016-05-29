@@ -41,6 +41,8 @@
 #define REDIS_REQUEST_MAX_SIZE (1024 * 1024 * 256) /* max bytes in inline command */
 #define REDIS_MAX_WRITE_PER_EVENT (1024 * 64)
 
+#define UNUSED(V) ((void) V)
+
 /* Object types */
 #define REDIS_STRING 0
 #define REDIS_LIST 1
@@ -130,7 +132,7 @@ typedef struct taskCommand {
     taskCommandProc* proc;
     int arity;
     int flags;
-};
+}taskCommand;
 
 void acceptHandler(aeEventLoop* el, int fd, void* privdata, int mask);
 void redisLog(int level, const char* fmt, ...);

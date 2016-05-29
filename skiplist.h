@@ -20,6 +20,7 @@ typedef struct skiplist {
 } skiplist;
 
 skiplist *createList(void);
+skiplistNode *createNode(int level,double score,void* obj);
 void freeList(skiplist *sl);
 skiplistNode *skiplistInsert(skiplist *sl,double score,void *obj);
 int skiplistDelete(skiplist *sl,double score,void *obj);

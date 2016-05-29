@@ -78,7 +78,6 @@ aeEventLoop* aeCreateEventLoop(int setsize)
     eventLoop->stop = 0;
     eventLoop->maxfd = -1;
     eventLoop->beforesleep = NULL;
-    eventLoop->timeEventList = createList();
     if (aeApiCreate(eventLoop) == -1)
         goto err;
     /* Events with mask == AE_NONE are not set. So let's initialize the
