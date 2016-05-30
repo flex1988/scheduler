@@ -228,6 +228,7 @@ long long aeCreateTimeEvent(aeEventLoop* eventLoop, long long milliseconds, aeTi
     te->clientData = clientData;
     te->next = eventLoop->timeEventHead;
     eventLoop->timeEventHead = te;
+    skiplistInsert(eventLoop->timeEventSkiplist, milliseconds, clientData);
     return id;
 }
 
