@@ -3,11 +3,21 @@
 taskServer server;
 // prototype
 
-struct taskCommand cmdTable[] = { { "get", getCommand, 2, REDIS_CMD_INLINE, NULL, 1, 1, 1 }, { "rpc", rpcCommand, 5, REDIS_CMD_BULK, NULL, 0, 0, 0 }, { "del", delCommand, 2, REDIS_CMD_INLINE, NULL, 1, 1, 1 } };
+struct taskCommand cmdTable[] = {
+    { "get", getCommand, 2, REDIS_CMD_INLINE, NULL, 1, 1, 1 },
+    { "rpc", rpcCommand, 5, REDIS_CMD_BULK, NULL, 0, 0, 0 },
+    { "del", delCommand, 2, REDIS_CMD_INLINE, NULL, 1, 1, 1 }
+};
 
-dictType dbDictType = { dictObjHash, NULL, NULL, dictObjKeyCompare, dictRedisObjectDestructor, dictRedisObjectDestructor };
+dictType dbDictType = { dictObjHash,
+                        NULL,
+                        NULL,
+                        dictObjKeyCompare,
+                        dictRedisObjectDestructor,
+                        dictRedisObjectDestructor };
 
-void initServer()
+void
+initServer()
 {
     server.mainthread = pthread_self();
     server.el = aeCreateEventLoop(1024 * 10);
@@ -17,6 +27,7 @@ void initServer()
     server.stat_connections = 0;
     server.db = zmalloc(sizeof(taskDb));
     server.db->dict = dictCreate(&dbDictType, NULL);
+    server.timer_dict = dictCreate(&dbDictType, NULL);
     server.fd = anetTcpServer(server.neterr, server.port, server.bindaddr);
     server.clients = listCreate();
     createSharedObjects();
@@ -24,27 +35,30 @@ void initServer()
         redisLog(REDIS_WARNING, "task tcp open err:%s", server.neterr);
         exit(1);
     }
-    if (aeCreateFileEvent(server.el, server.fd, AE_READABLE, acceptHandler, NULL) == AE_ERR) {
+    if (aeCreateFileEvent(server.el, server.fd, AE_READABLE, acceptHandler,
+                          NULL) == AE_ERR) {
         redisLog(REDIS_WARNING, "ae read err:%s", server.fd);
         exit(1);
     }
 }
 
-int main(int argc, char** argv)
+int
+main(int argc, char** argv)
 {
-    if (argc > 1 && strcasecmp(argv[1], "--daemonize") == 0)
-        daemonize();
+    if (argc > 1 && strcasecmp(argv[1], "--daemonize") == 0) daemonize();
     initServer();
-    redisLog(REDIS_NOTICE, "The server is now ready to accept connections on port %d", server.port);
+    redisLog(REDIS_NOTICE,
+             "The server is now ready to accept connections on port %d",
+             server.port);
     aeMain(server.el);
     return 0;
 }
 
-void daemonize(void)
+void
+daemonize(void)
 {
     int fd;
-    if (fork() != 0)
-        exit(0);
+    if (fork() != 0) exit(0);
 
     setsid();
 
@@ -55,7 +69,8 @@ void daemonize(void)
     }
 }
 
-void readQueryFromClient(aeEventLoop* el, int fd, void* privdata, int mask)
+void
+readQueryFromClient(aeEventLoop* el, int fd, void* privdata, int mask)
 {
     UNUSED(el);
     UNUSED(mask);
@@ -67,28 +82,26 @@ void readQueryFromClient(aeEventLoop* el, int fd, void* privdata, int mask)
     if (nread == -1) {
         if (errno == EAGAIN) {
             nread = 0;
-        }
-        else {
+        } else {
             redisLog(REDIS_VERBOSE, "Reading from client: %s", strerror(errno));
             freeClient(c);
             return;
         }
-    }
-    else if (nread == 0) {
+    } else if (nread == 0) {
         redisLog(REDIS_VERBOSE, "Client closed connection");
         freeClient(c);
         return;
     }
     if (nread) {
         c->querybuf = sdscatlen(c->querybuf, buf, nread);
-    }
-    else {
+    } else {
         return;
     }
     processInputBuffer(c);
 }
 
-void processInputBuffer(taskClient* c)
+void
+processInputBuffer(taskClient* c)
 {
     char* newline = NULL;
     int pos = 0, ok;
@@ -100,8 +113,7 @@ void processInputBuffer(taskClient* c)
         pos = (newline - c->querybuf) + 2;
         c->multibulklen = ll;
 
-        if (c->argv)
-            zfree(c->argv);
+        if (c->argv) zfree(c->argv);
         c->argv = zmalloc(sizeof(robj*) * c->multibulklen);
     }
 
@@ -110,27 +122,28 @@ void processInputBuffer(taskClient* c)
             newline = strchr(c->querybuf + pos, '\r');
             if (newline - (c->querybuf) > ((signed)sdslen(c->querybuf) - 2))
                 break;
-            ok = string2ll(c->querybuf + pos + 1, newline - (c->querybuf + pos + 1), &ll);
+            ok = string2ll(c->querybuf + pos + 1,
+                           newline - (c->querybuf + pos + 1), &ll);
             pos += newline - (c->querybuf + pos) + 2;
             c->bulklen = ll;
         }
         if (sdslen(c->querybuf) - pos < (unsigned)(c->bulklen + 2)) {
             break;
-        }
-        else {
-            c->argv[c->argc++] = createObject(OBJ_STRING, sdsnewlen(c->querybuf + pos, c->bulklen));
+        } else {
+            c->argv[c->argc++] = createObject(
+              OBJ_STRING, sdsnewlen(c->querybuf + pos, c->bulklen));
             pos += c->bulklen + 2;
             c->bulklen = -1;
             c->multibulklen--;
         }
     }
     /* Trim to pos */
-    if (pos)
-        sdsrange(c->querybuf, pos, -1);
+    if (pos) sdsrange(c->querybuf, pos, -1);
     processCommand(c);
 }
 
-int processCommand(taskClient* c)
+int
+processCommand(taskClient* c)
 {
     struct taskCommand* cmd;
     if (!strcasecmp(c->argv[0]->ptr, "quit")) {
@@ -140,7 +153,8 @@ int processCommand(taskClient* c)
     cmd = lookupCommand(c->argv[0]->ptr);
 
     if (!cmd) {
-        addReplySds(c, sdscatprintf(sdsempty(), "-ERR unknown command '%s'\r\n", (char*)c->argv[0]->ptr));
+        addReplySds(c, sdscatprintf(sdsempty(), "-ERR unknown command '%s'\r\n",
+                                    (char*)c->argv[0]->ptr));
         resetClient(c);
         return 1;
     }
@@ -149,17 +163,22 @@ int processCommand(taskClient* c)
     return 1;
 }
 
-struct taskCommand* lookupCommand(char* cmd)
+struct taskCommand*
+lookupCommand(char* cmd)
 {
     for (int i = 0; i < REDIS_CMD_NUM; i++) {
-        if (!strcasecmp(cmdTable[i].name, cmd))
-            return &cmdTable[i];
+        if (!strcasecmp(cmdTable[i].name, cmd)) return &cmdTable[i];
     }
     return NULL;
 }
-void call(taskClient* c, struct taskCommand* cmd) { cmd->proc(c); }
+void
+call(taskClient* c, struct taskCommand* cmd)
+{
+    cmd->proc(c);
+}
 
-void freeClient(taskClient* c)
+void
+freeClient(taskClient* c)
 {
     unlinkClient(c);
     listRelease(c->reply);
@@ -167,7 +186,8 @@ void freeClient(taskClient* c)
     zfree(c);
 }
 
-void unlinkClient(taskClient* c)
+void
+unlinkClient(taskClient* c)
 {
     listNode* ln;
     if (c->fd != -1) {
@@ -183,16 +203,17 @@ void unlinkClient(taskClient* c)
     }
 }
 
-taskClient* createClient(int fd)
+taskClient*
+createClient(int fd)
 {
     taskClient* c = zmalloc(sizeof(*c));
 
     anetNonBlock(NULL, fd);
     anetTcpNoDelay(NULL, fd);
-    if (!c)
-        return NULL;
+    if (!c) return NULL;
 
-    if (aeCreateFileEvent(server.el, fd, AE_READABLE, readQueryFromClient, c) == AE_ERR) {
+    if (aeCreateFileEvent(server.el, fd, AE_READABLE, readQueryFromClient, c) ==
+        AE_ERR) {
         close(fd);
         zfree(c);
         return NULL;
@@ -212,7 +233,8 @@ taskClient* createClient(int fd)
     return c;
 }
 
-void acceptHandler(aeEventLoop* el, int fd, void* privdata, int mask)
+void
+acceptHandler(aeEventLoop* el, int fd, void* privdata, int mask)
 {
     UNUSED(el);
     UNUSED(privdata);
@@ -223,7 +245,8 @@ void acceptHandler(aeEventLoop* el, int fd, void* privdata, int mask)
 
     cfd = anetAccept(server.neterr, fd, cip, &cport);
     if (cfd == AE_ERR) {
-        redisLog(REDIS_VERBOSE, "Accepting client connection: %s", server.neterr);
+        redisLog(REDIS_VERBOSE, "Accepting client connection: %s",
+                 server.neterr);
         return;
     }
     redisLog(REDIS_VERBOSE, "Accepted %s:%d %d", cip, cport, cfd);
@@ -236,14 +259,14 @@ void acceptHandler(aeEventLoop* el, int fd, void* privdata, int mask)
     server.stat_connections++;
 }
 
-void redisLog(int level, const char* fmt, ...)
+void
+redisLog(int level, const char* fmt, ...)
 {
     va_list ap;
     FILE* fp;
 
     fp = (server.logfile == NULL) ? stdout : fopen(server.logfile, "a");
-    if (!fp)
-        return;
+    if (!fp) return;
 
     va_start(ap, fmt);
     char* c = ".-*#";
@@ -260,11 +283,11 @@ void redisLog(int level, const char* fmt, ...)
 
     va_end(ap);
 
-    if (server.logfile)
-        fclose(fp);
+    if (server.logfile) fclose(fp);
 }
 
-robj* createObject(int type, void* ptr)
+robj*
+createObject(int type, void* ptr)
 {
     robj* o;
     o = zmalloc(sizeof(*o));
@@ -275,10 +298,19 @@ robj* createObject(int type, void* ptr)
     return o;
 }
 
-void getCommand(taskClient* c) { getGenericCommand(c); }
-void delCommand(taskClient* c) { delGenericCommand(c); }
+void
+getCommand(taskClient* c)
+{
+    getGenericCommand(c);
+}
+void
+delCommand(taskClient* c)
+{
+    delGenericCommand(c);
+}
 
-int getGenericCommand(taskClient* c)
+int
+getGenericCommand(taskClient* c)
 {
     robj* o;
     if ((o = lookupKeyReadOrReply(c, c->argv[1], shared.nullbulk)) == NULL)
@@ -287,32 +319,54 @@ int getGenericCommand(taskClient* c)
     if (o->type != REDIS_STRING) {
         addReply(c, shared.wrongtypeerr);
         return REDIS_ERR;
-    }
-    else {
+    } else {
         addReplyBulk(c, o);
         return REDIS_OK;
     }
 }
 
-int delGenericCommand(taskClient* c)
+int
+delGenericCommand(taskClient* c)
 {
-    long long timeId = atoi(c->argv[1]->ptr);
-    aeDeleteTimeEvent(server.el, timeId);
-    addReply(c, shared.ok);
-    return REDIS_OK;
+    long long timeId = atoll(c->argv[1]->ptr);
+
+    dictEntry* de = dictFind(server.timer_dict, c->argv[1]);
+    if (de) {
+        robj* val = dictGetEntryVal(de);
+        long long score = atoll(val->ptr);
+        int del = aeDeleteTimeEvent(server.el, score, timeId);
+        if (del < 1) {
+            addReply(c, shared.notfound);
+            return REDIS_ERR;
+        }
+        addReply(c, shared.ok);
+        return REDIS_OK;
+    } else {
+        redisLog(REDIS_ERR, "Not found timerId: %d", timeId);
+        addReply(c, shared.notfound);
+        return REDIS_ERR;
+    }
 }
 
-void addReply(taskClient* c, robj* obj)
+void
+addReply(taskClient* c, robj* obj)
 {
-    if (listLength(c->reply) == 0 && aeCreateFileEvent(server.el, c->fd, AE_WRITABLE, sendReplyToClient, c) == AE_ERR) {
+    if (listLength(c->reply) == 0 &&
+        aeCreateFileEvent(server.el, c->fd, AE_WRITABLE, sendReplyToClient,
+                          c) == AE_ERR) {
         return;
     }
     listAddNodeTail(c->reply, getDecodedObject(obj));
 }
 
-void addReplytoWorker(timeEventObject* tobj, robj* obj) { addReplyBulkList(tobj->message, obj); }
+void
+addReplytoWorker(timeEventObject* tobj, robj* obj)
+{
+    addReplyBulkList(tobj->message, obj);
+}
 
-void sendReplyToClient(aeEventLoop* el, int fd, void* privdata, int mask)
+void
+sendReplyToClient(aeEventLoop* el, int fd, void* privdata, int mask)
 {
     UNUSED(el);
     UNUSED(mask);
@@ -329,24 +383,22 @@ void sendReplyToClient(aeEventLoop* el, int fd, void* privdata, int mask)
             continue;
         }
         nwritten = write(fd, ((char*)o->ptr) + c->sentlen, objlen - c->sentlen);
-        if (nwritten <= 0)
-            break;
+        if (nwritten <= 0) break;
         c->sentlen += nwritten;
         totwritten += nwritten;
         if (c->sentlen == objlen) {
             listDelNode(c->reply, listFirst(c->reply));
             c->sentlen = 0;
         }
-        if (totwritten > REDIS_MAX_WRITE_PER_EVENT)
-            break;
+        if (totwritten > REDIS_MAX_WRITE_PER_EVENT) break;
     }
 
     if (nwritten == -1) {
         if (errno == EAGAIN) {
             nwritten = 0;
-        }
-        else {
-            redisLog(REDIS_VERBOSE, "Error writing to client: %s", strerror(errno));
+        } else {
+            redisLog(REDIS_VERBOSE, "Error writing to client: %s",
+                     strerror(errno));
             freeClient(c);
             return;
         }
@@ -358,20 +410,25 @@ void sendReplyToClient(aeEventLoop* el, int fd, void* privdata, int mask)
     }
 }
 
-robj* lookupKey(taskDb* db, robj* key)
+robj*
+lookupKey(taskDb* db, robj* key)
 {
     dictEntry* de = dictFind(db->dict, key);
     if (de) {
         return dictGetEntryVal(de);
-    }
-    else {
+    } else {
         return NULL;
     }
 }
 
-void setCommand(taskClient* c) { setGenericCommand(c, 0, c->argv[1], c->argv[2], NULL); }
+void
+setCommand(taskClient* c)
+{
+    setGenericCommand(c, 0, c->argv[1], c->argv[2], NULL);
+}
 
-void callWorker(char* addr, int port, list* msg)
+void
+callWorker(char* addr, int port, list* msg)
 {
     char* err = zmalloc(100 * sizeof(char));
     int fd;
@@ -394,8 +451,7 @@ void callWorker(char* addr, int port, list* msg)
             continue;
         }
         nwritten = write(fd, ((char*)o->ptr) + sentlen, objlen - sentlen);
-        if (nwritten <= 0)
-            break;
+        if (nwritten <= 0) break;
         sentlen += nwritten;
         totwritten += nwritten;
         if (sentlen == objlen) {
@@ -405,7 +461,8 @@ void callWorker(char* addr, int port, list* msg)
     close(fd);
 }
 
-int setGenericCommand(taskClient* c, int nx, robj* key, robj* val, robj* expire)
+int
+setGenericCommand(taskClient* c, int nx, robj* key, robj* val, robj* expire)
 {
     UNUSED(nx);
     UNUSED(expire);
@@ -414,8 +471,7 @@ int setGenericCommand(taskClient* c, int nx, robj* key, robj* val, robj* expire)
         incrRefCount(val);
         addReply(c, shared.ok);
         return REDIS_ERR;
-    }
-    else {
+    } else {
         sds copy = sdsdup(key->ptr);
         dictAdd(c->db->dict, createObject(REDIS_STRING, copy), val);
         incrRefCount(val);
@@ -424,9 +480,14 @@ int setGenericCommand(taskClient* c, int nx, robj* key, robj* val, robj* expire)
     }
 }
 
-void resetClient(taskClient* c) { freeClientArgv(c); }
+void
+resetClient(taskClient* c)
+{
+    freeClientArgv(c);
+}
 
-void freeClientArgv(taskClient* c)
+void
+freeClientArgv(taskClient* c)
 {
     int j;
     for (j = 0; j < c->argc; j++)
@@ -434,45 +495,52 @@ void freeClientArgv(taskClient* c)
     c->argc = 0;
 }
 
-void addReplySds(taskClient* c, sds s)
+void
+addReplySds(taskClient* c, sds s)
 {
     robj* o = createObject(REDIS_STRING, s);
     addReply(c, o);
     decrRefCount(o);
 }
 
-void addReplyList(list* l, robj* obj) { listAddNodeTail(l, getDecodedObject(obj)); }
+void
+addReplyList(list* l, robj* obj)
+{
+    listAddNodeTail(l, getDecodedObject(obj));
+}
 
-robj* lookupKeyReadOrReply(taskClient* c, robj* key, robj* reply)
+robj*
+lookupKeyReadOrReply(taskClient* c, robj* key, robj* reply)
 {
     robj* o = lookupKeyRead(c->db, key);
-    if (!o)
-        addReply(c, reply);
+    if (!o) addReply(c, reply);
     return o;
 }
 
-void addReplyBulk(taskClient* c, robj* obj)
+void
+addReplyBulk(taskClient* c, robj* obj)
 {
     addReplyBulkLen(c, obj);
     addReply(c, obj);
     addReply(c, shared.crlf);
 }
 
-void addReplyBulkList(list* l, robj* obj)
+void
+addReplyBulkList(list* l, robj* obj)
 {
     addReplyBulkLenList(l, obj);
     addReplyList(l, obj);
     addReplyList(l, shared.crlf);
 }
 
-void addReplyBulkLen(taskClient* c, robj* obj)
+void
+addReplyBulkLen(taskClient* c, robj* obj)
 {
     size_t len, intlen;
     char buf[128];
     if (obj->encoding == REDIS_ENCODING_RAW) {
         len = sdslen(obj->ptr);
-    }
-    else {
+    } else {
         long n = (long)obj->ptr;
         len = 1;
         if (n < 0) {
@@ -490,15 +558,15 @@ void addReplyBulkLen(taskClient* c, robj* obj)
     addReplySds(c, sdsnewlen(buf, intlen + 3));
 }
 
-void addReplyBulkLenList(list* l, robj* obj)
+void
+addReplyBulkLenList(list* l, robj* obj)
 {
     size_t len, intlen;
     char buf[128];
 
     if (obj->encoding == REDIS_ENCODING_RAW) {
         len = sdslen(obj->ptr);
-    }
-    else {
+    } else {
         long n = (long)obj->ptr;
         len = 1;
         if (n < 0) {
@@ -516,74 +584,93 @@ void addReplyBulkLenList(list* l, robj* obj)
     addReplyList(l, createObject(REDIS_STRING, sdsnewlen(buf, intlen + 3)));
 }
 
-void createSharedObjects(void)
+void
+createSharedObjects(void)
 {
     shared.crlf = createObject(REDIS_STRING, sdsnew("\r\n"));
     shared.nullbulk = createObject(REDIS_STRING, sdsnew("$-1\r\n"));
-    shared.wrongtypeerr = createObject(REDIS_STRING, sdsnew("-Operation against a key holding the wrong kind of value\r\n"));
+    shared.wrongtypeerr = createObject(
+      REDIS_STRING,
+      sdsnew("-Operation against a key holding the wrong kind of value\r\n"));
     shared.ok = createObject(REDIS_STRING, sdsnew("+OK\r\n"));
     shared.notfound = createObject(REDIS_STRING, sdsnew("-key not found\r\n"));
+    shared.internelerr =
+      createObject(REDIS_STRING, sdsnew("-internal error\r\n"));
 }
 
-robj* lookupKeyRead(taskDb* db, robj* key) { return lookupKey(db, key); }
+robj*
+lookupKeyRead(taskDb* db, robj* key)
+{
+    return lookupKey(db, key);
+}
 
-unsigned int dictObjHash(const void* key)
+unsigned int
+dictObjHash(const void* key)
 {
     const robj* o = key;
     return dictGenHashFunction(o->ptr, sdslen((sds)o->ptr));
 }
 
-int dictObjKeyCompare(void* privdata, const void* key1, const void* key2)
+int
+dictObjKeyCompare(void* privdata, const void* key1, const void* key2)
 {
     const robj *o1 = key1, *o2 = key2;
     return sdsDictKeyCompare(privdata, o1->ptr, o2->ptr);
 }
 
-void dictRedisObjectDestructor(void* privdata, void* val)
+void
+dictRedisObjectDestructor(void* privdata, void* val)
 {
     UNUSED(privdata);
-    if (val == NULL)
-        return;
+
+    if (val == NULL) return;
     decrRefCount(val);
 }
 
-void decrRefCount(void* obj)
+void
+decrRefCount(void* obj)
 {
     robj* o = obj;
     if (--(o->refcount) == 0) {
         switch (o->type) {
-        case REDIS_STRING:
-            freeStringObject(o);
-            break;
-        case REDIS_LIST:
-            freeListObject(o);
-            break;
+            case REDIS_STRING:
+                freeStringObject(o);
+                break;
+            case REDIS_LIST:
+                freeListObject(o);
+                break;
         }
         zfree(o);
     }
 }
 
-void freeListObject(robj* o) { listRelease((list*)o->ptr); }
+void
+freeListObject(robj* o)
+{
+    listRelease((list*)o->ptr);
+}
 
-void freeStringObject(robj* obj)
+void
+freeStringObject(robj* obj)
 {
     if (obj->encoding == REDIS_ENCODING_RAW) {
         sdsfree(obj->ptr);
     }
 }
 
-int sdsDictKeyCompare(void* privdata, const void* key1, const void* key2)
+int
+sdsDictKeyCompare(void* privdata, const void* key1, const void* key2)
 {
     UNUSED(privdata);
     int l1, l2;
     l1 = sdslen((sds)key1);
     l2 = sdslen((sds)key2);
-    if (l1 != l2)
-        return 0;
+    if (l1 != l2) return 0;
     return memcmp(key1, key2, l1) == 0;
 }
 
-robj* getDecodedObject(robj* o)
+robj*
+getDecodedObject(robj* o)
 {
     if (o->encoding == REDIS_ENCODING_RAW) {
         incrRefCount(o);
@@ -591,9 +678,14 @@ robj* getDecodedObject(robj* o)
     }
 }
 
-void incrRefCount(robj* o) { o->refcount++; }
+void
+incrRefCount(robj* o)
+{
+    o->refcount++;
+}
 
-void rpcCommand(taskClient* c)
+void
+rpcCommand(taskClient* c)
 {
     timeEventObject* obj = zmalloc(sizeof(timeEventObject));
     char* split = strchr(c->argv[3]->ptr, ':');
@@ -605,25 +697,50 @@ void rpcCommand(taskClient* c)
     gettimeofday(&tv, NULL);
     milliseconds = tv.tv_sec * 1000 + tv.tv_usec / 1000;
     long long eventMilliSeconds = atoll(c->argv[2]->ptr);
-    if (eventMilliSeconds > milliseconds)
+    long long unixSeconds;
+    if (eventMilliSeconds > milliseconds) {
         obj->ttl = eventMilliSeconds - milliseconds;
-    else
+        unixSeconds = eventMilliSeconds;
+    } else {
         obj->ttl = eventMilliSeconds;
+        unixSeconds = eventMilliSeconds + milliseconds;
+    }
 
     obj->message = listCreate();
-    obj->type = strcasecmp("once", c->argv[1]->ptr) == 0 ? TASK_ONCE : TASK_REPEAT;
+    obj->type =
+      strcasecmp("once", c->argv[1]->ptr) == 0 ? TASK_ONCE : TASK_REPEAT;
     robj* buf = createObject(REDIS_STRING, sdsdup(c->argv[4]->ptr));
     addReplytoWorker(obj, getDecodedObject(buf));
     long long timeId;
-    char time[33];
-    if ((timeId = aeCreateTimeEvent(server.el, obj->ttl, notifyWorker, obj, finalizerTimeEvent)) == AE_ERR) {
+    char time[32];
+    char timeVal[32];
+    if ((timeId = aeCreateTimeEvent(server.el, unixSeconds, obj->ttl,
+                                    notifyWorker, obj, finalizerTimeEvent)) ==
+        AE_ERR) {
         redisLog(REDIS_NOTICE, "redis create task failed\n");
     }
-    sprintf(time, "%lld", timeId);
-    addReply(c, createObject(REDIS_STRING, sdscatprintf(sdsempty(), "+OK timeEventId:%s\r\n", time)));
+
+    sprintf(time, "%lld\n", timeId);
+    sprintf(timeVal, "%lld\n", unixSeconds);
+    robj* key = createObject(REDIS_STRING, sdsnew(strtok(time, "\n")));
+    robj* val = createObject(REDIS_STRING, sdsnew(strtok(timeVal, "\n")));
+
+    if (dictFind(server.timer_dict, key) != NULL) {
+        dictReplace(server.timer_dict, key, val);
+        incrRefCount(val);
+    } else {
+        dictAdd(server.timer_dict, key, val);
+        incrRefCount(val);
+    }
+    dictEntry* de = dictFind(server.timer_dict, key);
+    robj* value = dictGetEntryVal(de);
+    addReply(c, createObject(
+                  REDIS_STRING,
+                  sdscatprintf(sdsempty(), "+OK timeEventId:%s\r\n", time)));
 }
 
-void finalizerTimeEvent(struct aeEventLoop* eventLoop, void* clientData)
+void
+finalizerTimeEvent(struct aeEventLoop* eventLoop, void* clientData)
 {
     UNUSED(eventLoop);
     timeEventObject* obj = (timeEventObject*)clientData;
@@ -632,7 +749,8 @@ void finalizerTimeEvent(struct aeEventLoop* eventLoop, void* clientData)
     zfree(obj);
 }
 
-int notifyWorker(struct aeEventLoop* eventLoop, long long id, void* clientData)
+int
+notifyWorker(struct aeEventLoop* eventLoop, long long id, void* clientData)
 {
     UNUSED(eventLoop);
     UNUSED(id);
